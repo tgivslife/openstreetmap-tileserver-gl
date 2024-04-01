@@ -1,0 +1,26 @@
+# object files created during the build and the output binary itself
+*.o
+tilemaker
+tilemaker-server
+build/
+tilemaker.dSYM/
+
+# editor temporaries
+*~
+
+# vagrant local stuff
+.vagrant/
+
+# IDE
+###################
+.idea
+*.iml
+
+# protocol buffers generated headers
+include/osmformat.pb.h
+include/vector_tile.pb.h
+
+# downloaded data
+coastline
+landcover
+/test.*
