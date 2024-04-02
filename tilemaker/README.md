@@ -12,7 +12,7 @@ Vector tiles are the modern way of rendering maps. [Read more](docs/4.VECTOR_TIL
 
 ## Installing
 
-Tilemaker is written in C++14. The chief dependencies are:
+Tilemaker is written in C++14. The dependencies are:
 
 * Boost (latest version advised, 1.66 minimum)
 * Lua (5.1 or later) or LuaJIT
@@ -26,6 +26,10 @@ You can then simply install with:
 
     make
     sudo make install
+
+The recommended method is to use docker:
+
+    docker build . -t tilemaker
 
 For detailed installation instructions for your operating system, see [INSTALL.md](docs/1.INSTALL.md).
 
@@ -45,7 +49,7 @@ To process large areas without running out of memory, tell it to use temporary s
 
 To include sea tiles, create a directory called `coastline` in the same place you're running tilemaker from, and then
 save the files from [osmdata.openstreetmap.de](https://osmdata.openstreetmap.de/download/water-polygons-split-4326.zip)
-in it, such that tilemaker can find a file at `coastline/water_polygons.shp`.
+in it, such that tilemaker can find a file at `coastline/water_polygons.shx`.
 
 _(If you want to include optional small-scale land-cover, create a `landcover` directory, and download the appropriate
 10m files from 'Features' at https://www.naturalearthdata.com so that you
@@ -76,4 +80,46 @@ and `--process`, an error will result.
 
 ## Running
 
-Read about tilemaker's runtime options in [RUNNING.md](docs/3.RUNNING.md).
+The recommended method is to use docker:
+
+    docker run \
+        -v ./osm/coastline/:/coastline \
+        -v ./osm/landcover/:/landcover \
+        -v ./osm/data/:/osm-data \
+        -v ./osm/cache/:/osm-cache \
+        -v ./osm/config/:/tilemaker-config \
+        -it --rm stsdockerhub/tilemaker:1.0.2b68d2c \
+        --input /osm-data/romania-latest.osm.pbf \ 
+        --output /osm-data/romania-latest.mbtiles \
+        --config /tilemaker-config/config-openmaptiles.json \
+        --process /tilemaker-config/process-openmaptiles.lua \
+        --store /osm-cache
+
+The docker command assumes the existence of the following folder structure:
+
+    // * required
+    osm
+        cache
+        coastline
+            water_polygons.cpg
+            water_polygons.dbf
+            water_polygons.prj
+            water_polygons.shp
+            *water_polygons.shx
+        config
+            *config-openmaptiles.json
+            *process-openmaptiles.lua
+        data
+            *romania-latest.mbtiles
+            *romania-latest.osm.pbf
+        landcover
+            ne_10m_urban_areas
+                ne_10m_urban_areas.cpg
+                ne_10m_urban_areas.dbf
+                ne_10m_urban_areas.prj
+                ne_10m_urban_areas.README.html
+                *ne_10m_urban_areas.shp
+                ne_10m_urban_areas.shx
+                ne_10m_urban_areas.VERSION.txt
+
+Read more about Tilemaker's runtime options in [RUNNING.md](docs/3.RUNNING.md).
