@@ -53,7 +53,10 @@ in it, such that tilemaker can find a file at `coastline/water_polygons.shx`.
 
 _(If you want to include optional small-scale land-cover, create a `landcover` directory, and download the appropriate
 10m files from 'Features' at https://www.naturalearthdata.com so that you
-have [landcover/ne_10m_antarctic_ice_shelves_polys/ne_10m_antarctic_ice_shelves_polys.shp](https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/10m/physical/ne_10m_antarctic_ice_shelves_polys.zip), [landcover/ne_10m_urban_areas/ne_10m_urban_areas.shp](https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/10m/cultural/ne_10m_urban_areas.zip), [landcover/ne_10m_glaciated_areas/ne_10m_glaciated_areas.shp](https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/10m/physical/ne_10m_glaciated_areas.zip).)_
+have 
+[landcover/ne_10m_antarctic_ice_shelves_polys/ne_10m_antarctic_ice_shelves_polys.shp](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-antarctic-ice-shelves/), 
+[landcover/ne_10m_urban_areas/ne_10m_urban_areas.shp](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-urban-area/), 
+[landcover/ne_10m_glaciated_areas/ne_10m_glaciated_areas.shp](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-glaciated-areas/).)_
 
 Then, to serve your tiles using the demonstration server:
 
