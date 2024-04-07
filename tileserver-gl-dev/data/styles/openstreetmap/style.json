@@ -9963,15 +9963,25 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "water_name",
-      "minzoom": 16,
-      "maxzoom": 22,
+      "minzoom": 2,
+      "maxzoom": 24,
       "layout": {
         "text-font": [
           "Open Sans Regular",
           "Open Sans Light"
         ],
         "text-size": 11,
-        "text-field": "{name:en}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "visibility": "visible",
         "text-max-width": 5
       },

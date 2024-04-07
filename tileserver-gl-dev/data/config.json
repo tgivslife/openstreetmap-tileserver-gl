@@ -31,7 +31,7 @@
       "mbtiles": "romania-latest.tilemaker.mbtiles"
     },
     "romania-planetiler": {
-      "mbtiles": "romania-latest.planetiler.mbtiles"
+      "mbtiles": "europe-latest.output.mbtiles"
     },
     "europe": {
       "mbtiles": "europe-latest.output.mbtiles"
