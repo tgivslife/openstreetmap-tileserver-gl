@@ -1,14 +1,14 @@
 {
   "version": 8,
-  "id": "streets-v3",
-  "name": "Streets V3",
+  "id": "streets",
+  "name": "Streets",
   "metadata":{
     "openmaptiles:version":"3.x"
   },
   "sources": {
     "openmaptiles": {
       "type":"vector",
-      "url":"mbtiles://{europe}"
+      "url":"mbtiles://{romania-planetiler}"
     }
   },
   "glyphs":"{fontstack}/{range}.pbf",
@@ -506,6 +506,7 @@
         ]
       ]
     },
+
     {
       "id": "waterway_river",
       "type": "line",
@@ -538,16 +539,6 @@
           "==",
           "class",
           "river"
-        ],
-        [
-          "!=",
-          "brunnel",
-          "tunnel"
-        ],
-        [
-          "!=",
-          "intermittent",
-          1
         ]
       ]
     },
@@ -893,7 +884,7 @@
       "source-layer": "transportation",
       "layout": {
         "line-join": "round",
-        "visibility": "visible"
+        "visibility": "none"
       },
       "paint": {
         "line-color": "rgba(108, 159, 182, 1)",
@@ -5072,21 +5063,14 @@
           "admin_level",
           3,
           4
-        ],
-        [
-          "==",
-          "maritime",
-          0
         ]
       ]
     },
     {
-      "id": "boundary_2_z0-4",
+      "id": "boundary_2",
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "boundary",
-      "minzoom": 0,
-      "maxzoom": 5,
       "layout": {
         "line-cap": "round",
         "line-join": "round",
@@ -5104,10 +5088,26 @@
             [
               5,
               1.2
+            ],
+            [
+              12,
+              3
             ]
           ]
         },
-        "line-opacity": 1
+        "line-opacity": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              0.4
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        }
       },
       "metadata": {},
       "filter": [
@@ -5119,17 +5119,13 @@
         ],
         [
           "==",
-          "maritime",
-          0
-        ],
-        [
-          "==",
           "disputed",
           0
         ],
         [
-          "!has",
-          "claimed_by"
+          "==",
+          "maritime",
+          0
         ]
       ]
     },
@@ -5143,7 +5139,7 @@
       "layout": {
         "line-cap": "round",
         "line-join": "round",
-        "visibility": "visible"
+        "visibility": "none"
       },
       "paint": {
         "line-color": "rgba(98,185,229,1)",
@@ -5453,7 +5449,7 @@
       "layout": {
         "line-cap": "round",
         "line-join": "round",
-        "visibility": "visible"
+        "visibility": "none"
       },
       "paint": {
         "line-color": "rgba(98,185,229,1)",

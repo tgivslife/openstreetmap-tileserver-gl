@@ -10,6 +10,15 @@
     "serveAllFonts": true
   },
   "styles": {
+    "osm-liberty": {
+      "style": "osm-liberty/style.json"
+    },
+    "openstreetmap": {
+      "style": "openstreetmap/style.json"
+    },
+    "streets": {
+      "style": "streets/style.json"
+    },
     "streets-v2": {
       "style": "streets-v2/style.json"
     },
@@ -18,11 +27,14 @@
     }
   },
   "data": {
-    "v3": {
-      "mbtiles": "zurich_switzerland.mbtiles"
+    "romania-tilemaker": {
+      "mbtiles": "romania-latest.tilemaker.mbtiles"
     },
-    "romania": {
-      "mbtiles": "romania-latest.mbtiles"
+    "romania-planetiler": {
+      "mbtiles": "romania-latest.planetiler.mbtiles"
+    },
+    "europe": {
+      "mbtiles": "europe-latest.output.mbtiles"
     }
   }
 }

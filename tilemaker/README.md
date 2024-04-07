@@ -85,12 +85,18 @@ and `--process`, an error will result.
 
 The recommended method is to use docker:
 
+    -- windows 
+
+    docker run -v .\osm\tilemaker\data\:/osm-data -v .\osm\tilemaker\cache\:/osm-cache -v .\osm\tilemaker\coastline\:/coastline -v .\osm\tilemaker\landcover\:/landcover -v .\osm\tilemaker\config\:/tilemaker-config -it stsdockerhub/tilemaker:1.0.2b68d2c --input /osm-data/romania-latest.osm.pbf --output /osm-data/romania-latest.mbtiles --config /tilemaker-config/config-openmaptiles.json --process /tilemaker-config/process-openmaptiles.lua --store /osm-cache
+
+    -- linux    
+
     docker run \
-        -v ./osm/coastline/:/coastline \
-        -v ./osm/landcover/:/landcover \
-        -v ./osm/data/:/osm-data \
-        -v ./osm/cache/:/osm-cache \
-        -v ./osm/config/:/tilemaker-config \
+        -v ./osm/tilemaker/coastline/:/coastline \
+        -v ./osm/tilemaker/landcover/:/landcover \
+        -v ./osm/tilemaker/data/:/osm-data \
+        -v ./osm/tilemaker/cache/:/osm-cache \
+        -v ./osm/tilemaker/config/:/tilemaker-config \
         -it --rm stsdockerhub/tilemaker:1.0.2b68d2c \
         --input /osm-data/romania-latest.osm.pbf \ 
         --output /osm-data/romania-latest.mbtiles \
@@ -102,27 +108,40 @@ The docker command assumes the existence of the following folder structure:
 
     // * required
     osm
-        cache
-        coastline
-            water_polygons.cpg
-            water_polygons.dbf
-            water_polygons.prj
-            water_polygons.shp
-            *water_polygons.shx
-        config
-            *config-openmaptiles.json
-            *process-openmaptiles.lua
-        data
-            *romania-latest.mbtiles
-            *romania-latest.osm.pbf
-        landcover
-            ne_10m_urban_areas
-                ne_10m_urban_areas.cpg
-                ne_10m_urban_areas.dbf
-                ne_10m_urban_areas.prj
-                ne_10m_urban_areas.README.html
-                *ne_10m_urban_areas.shp
-                ne_10m_urban_areas.shx
-                ne_10m_urban_areas.VERSION.txt
+        tilemaker
+            cache
+            coastline
+                water_polygons.cpg
+                water_polygons.dbf
+                water_polygons.prj
+                water_polygons.shp
+                *water_polygons.shx
+            landcover
+                ne_10m_urban_areas
+                    ne_10m_urban_areas.cpg
+                    ne_10m_urban_areas.dbf
+                    ne_10m_urban_areas.prj
+                    ne_10m_urban_areas.README.html
+                    *ne_10m_urban_areas.shp
+                    ne_10m_urban_areas.shx
+                    ne_10m_urban_areas.VERSION.txt
+                ne_10m_antarctic_ice_shelves_polys
+                    ne_10m_antarctic_ice_shelves_polys.cpg
+                    ne_10m_antarctic_ice_shelves_polys.dbf
+                    ne_10m_antarctic_ice_shelves_polys.prj
+                    *ne_10m_antarctic_ice_shelves_polys.shp
+                    ne_10m_antarctic_ice_shelves_polys.shx
+                ne_10m_glaciated_areas
+                    ne_10m_glaciated_areas.cpg
+                    ne_10m_glaciated_areas.dbf
+                    ne_10m_glaciated_areas.prj
+                    *ne_10m_glaciated_areas.shp
+                    ne_10m_glaciated_areas.shx
+            config
+                *config-openmaptiles.json
+                *process-openmaptiles.lua
+            data
+                *romania-latest.mbtiles
+                *romania-latest.osm.pbf
 
 Read more about Tilemaker's runtime options in [RUNNING.md](docs/3.RUNNING.md).

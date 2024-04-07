@@ -5,7 +5,7 @@
   "sources": {
     "maptiler_planet": {
       "type":"vector",
-      "url":"mbtiles://{romania}"
+      "url":"mbtiles://{europe}"
     }
   },
   "glyphs":"{fontstack}/{range}.pbf",

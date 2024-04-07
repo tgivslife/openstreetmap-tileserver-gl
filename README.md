@@ -1,11 +1,22 @@
 # OpenStreetMap-TileServer-GL
 
 Project for making OpenStreetMap vector tiles based on the [OpenMapTiles](https://github.com/openmaptiles/openmaptiles)
-schema using [systemed/tilemaker](https://github.com/systemed/tilemaker) and also serving and rendering the generated
-vector tiles using [maptiler/tileserver-gl](https://github.com/maptiler/tileserver-gl)
+schema.
+
+We use tools that generate [Vector Tiles](https://github.com/mapbox/vector-tile-spec/tree/master/2.1) from geographic
+data sources like [OpenStreetMap](https://www.openstreetmap.org/) or [Geofabrik](https://download.geofabrik.de/).
+
+- [Tilemaker]((https://github.com/systemed/tilemaker)) creates vector tiles (in Mapbox Vector Tile format) from an
+  .osm.pbf planet extract, as typically downloaded from providers like Geofabrik. It aims to be 'stack-free': you need
+  no database and there is only one executable to install.
+- [Planetiler](https://github.com/onthegomap/planetiler) aims to be fast and memory-efficient so that you can build a
+  map of the world in a few hours on a single machine without any external tools or database.
+
+For serving and rendering the generated vector tiles we use [maptiler/tileserver-gl](https://github.com/maptiler/tileserver-gl)
 
 - [OpenMapTiles](#openmaptiles)
 - [Tilemaker](#tilemaker)
+- [Planetiler](#planetiler)
 
 ## OpenMapTiles
 
@@ -37,3 +48,5 @@ on-the-fly style changes and greater interactivity, while imposing less of a sto
 Tilemaker can output them to individual files, or to .mbtiles or .pmtiles tile containers.
 
 You can read more about this in [TILEMAKER.md](tilemaker/README.md).
+
+## Planetiler
