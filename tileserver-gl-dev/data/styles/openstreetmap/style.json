@@ -5,7 +5,7 @@
   "sources": {
     "openmaptiles": {
       "type":"vector",
-      "url":"mbtiles://{romania-planetiler}"
+      "url":"mbtiles://{planet-planetiler}"
     }
   },
   "glyphs":"{fontstack}/{range}.pbf",

@@ -33,6 +33,9 @@
     "romania-planetiler": {
       "mbtiles": "europe-latest.output.mbtiles"
     },
+    "planet-planetiler": {
+      "mbtiles": "planet-240401.mbtiles"
+    },
     "europe": {
       "mbtiles": "europe-latest.output.mbtiles"
     }
