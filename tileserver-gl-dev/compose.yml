@@ -3,7 +3,7 @@ version: '3.7'
 services:
   tileserver-gl:
     container_name: tileserver-gl
-    image: maptiler/tileserver-gl:v4.10.3
+    image: stsdockerhub/tileserver-gl:4.10.3-56cca70
     volumes:
       - "./data:/data"
     command: [ "--verbose", "--config", "/data/config.json" ]

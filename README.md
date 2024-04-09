@@ -17,6 +17,7 @@ For serving and rendering the generated vector tiles we use [maptiler/tileserver
 - [OpenMapTiles](#openmaptiles)
 - [Tilemaker](#tilemaker)
 - [Planetiler](#planetiler)
+- [TilseServer-GL](#tileserver-gl)
 
 ## OpenMapTiles
 
@@ -50,3 +51,10 @@ Tilemaker can output them to individual files, or to .mbtiles or .pmtiles tile c
 You can read more about this in [TILEMAKER.md](tilemaker/README.md).
 
 ## Planetiler
+
+## TileServer GL
+
+Vector and raster maps with GL styles. Server-side rendering by MapLibre GL Native. Map tile server for MapLibre GL JS,
+Android, iOS, Leaflet, OpenLayers, GIS via WMTS, etc.
+
+You can read more about this in [TileServer GL.md](tileserver-gl/README.md)

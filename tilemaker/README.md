@@ -29,7 +29,7 @@ You can then simply install with:
 
 The recommended method is to use docker:
 
-    docker build . -t tilemaker
+    docker build . -t stsdockerhub/tilemaker
 
 For detailed installation instructions for your operating system, see [INSTALL.md](docs/1.INSTALL.md).
 
