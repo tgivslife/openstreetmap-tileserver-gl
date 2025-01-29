@@ -7,17 +7,15 @@
 // This happens on ARM:
 //  > terminate called after throwing an instance of 'std::runtime_error'
 //  > what():  Cannot read GLX extensions.
-import 'canvas';
+import { Image, createCanvas } from 'canvas';
 import '@maplibre/maplibre-gl-native';
 //
 // SECTION END
 
 import advancedPool from 'advanced-pool';
-import fs from 'node:fs';
 import path from 'path';
 import url from 'url';
 import util from 'util';
-import zlib from 'zlib';
 import sharp from 'sharp';
 import clone from 'clone';
 import Color from 'color';
@@ -25,31 +23,49 @@ import express from 'express';
 import sanitize from 'sanitize-filename';
 import SphericalMercator from '@mapbox/sphericalmercator';
 import mlgl from '@maplibre/maplibre-gl-native';
-import MBTiles from '@mapbox/mbtiles';
 import polyline from '@mapbox/polyline';
 import proj4 from 'proj4';
 import axios from 'axios';
 import {
+  allowedScales,
+  allowedTileSizes,
   getFontsPbf,
   listFonts,
   getTileUrls,
   isValidHttpUrl,
   fixTileJSONCenter,
+  fetchTileData,
+  readFile,
 } from './utils.js';
-import {
-  openPMtiles,
-  getPMtilesInfo,
-  getPMtilesTile,
-} from './pmtiles_adapter.js';
+import { openPMtiles, getPMtilesInfo } from './pmtiles_adapter.js';
 import { renderOverlay, renderWatermark, renderAttribution } from './render.js';
+import fsp from 'node:fs/promises';
+import { existsP, gunzipP } from './promises.js';
+import { openMbTilesWrapper } from './mbtiles_wrapper.js';
 
-const FLOAT_PATTERN = '[+-]?(?:\\d+|\\d+.?\\d+)';
+const FLOAT_PATTERN = '[+-]?(?:\\d+|\\d*\\.\\d+)';
+
+const staticTypeRegex = new RegExp(
+  `^` +
+    `(?:` +
+    // Format 1: {lon},{lat},{zoom}[@{bearing}[,{pitch}]]
+    `(?<lon>${FLOAT_PATTERN}),(?<lat>${FLOAT_PATTERN}),(?<zoom>${FLOAT_PATTERN})` +
+    `(?:@(?<bearing>${FLOAT_PATTERN})(?:,(?<pitch>${FLOAT_PATTERN}))?)?` +
+    `|` +
+    // Format 2: {minx},{miny},{maxx},{maxy}
+    `(?<minx>${FLOAT_PATTERN}),(?<miny>${FLOAT_PATTERN}),(?<maxx>${FLOAT_PATTERN}),(?<maxy>${FLOAT_PATTERN})` +
+    `|` +
+    // Format 3: auto
+    `(?<auto>auto)` +
+    `)` +
+    `$`,
+);
+
 const PATH_PATTERN =
   /^((fill|stroke|width)\:[^\|]+\|)*(enc:.+|-?\d+(\.\d*)?,-?\d+(\.\d*)?(\|-?\d+(\.\d*)?,-?\d+(\.\d*)?)+)/;
-const httpTester = /^(http(s)?:)?\/\//;
+const httpTester = /^https?:\/\//i;
 
 const mercator = new SphericalMercator();
-const getScale = (scale) => (scale || '@1x').slice(1, 2) | 0;
 
 mlgl.on('message', (e) => {
   if (e.severity === 'WARNING' || e.severity === 'ERROR') {
@@ -80,6 +96,7 @@ const cachedEmptyResponses = {
  * @param {string} format The format (a sharp format or 'pbf').
  * @param {string} color The background color (or empty string for transparent).
  * @param {Function} callback The mlgl callback.
+ * @returns {void}
  */
 function createEmptyResponse(format, color, callback) {
   if (!format || format === 'pbf') {
@@ -102,33 +119,42 @@ function createEmptyResponse(format, color, callback) {
   }
 
   // create an "empty" response image
-  color = new Color(color);
-  const array = color.array();
-  const channels = array.length === 4 && format !== 'jpeg' ? 4 : 3;
-  sharp(Buffer.from(array), {
-    raw: {
-      width: 1,
-      height: 1,
-      channels,
-    },
-  })
-    .toFormat(format)
-    .toBuffer((err, buffer, info) => {
-      if (!err) {
+  try {
+    color = new Color(color);
+    const array = color.array();
+    const channels = array.length === 4 && format !== 'jpeg' ? 4 : 3;
+    sharp(Buffer.from(array), {
+      raw: {
+        width: 1,
+        height: 1,
+        channels,
+      },
+    })
+      .toFormat(format)
+      .toBuffer((err, buffer, info) => {
+        if (err) {
+          console.error('Error creating image with Sharp:', err);
+          callback(err, null);
+          return;
+        }
         cachedEmptyResponses[cacheKey] = buffer;
-      }
-      callback(null, { data: buffer });
-    });
+        callback(null, { data: buffer });
+      });
+  } catch (error) {
+    console.error('Error during image processing setup:', error);
+    callback(error, null);
+  }
 }
 
 /**
  * Parses coordinate pair provided to pair of floats and ensures the resulting
  * pair is a longitude/latitude combination depending on lnglat query parameter.
- * @param {List} coordinatePair Coordinate pair.
+ * @param {Array<string>} coordinatePair Coordinate pair.
  * @param coordinates
  * @param {object} query Request query parameters.
+ * @returns {Array<number>|null} Parsed coordinate pair as [longitude, latitude] or null if invalid
  */
-const parseCoordinatePair = (coordinates, query) => {
+function parseCoordinatePair(coordinates, query) {
   const firstCoordinate = parseFloat(coordinates[0]);
   const secondCoordinate = parseFloat(coordinates[1]);
 
@@ -144,15 +170,16 @@ const parseCoordinatePair = (coordinates, query) => {
   }
 
   return [firstCoordinate, secondCoordinate];
-};
+}
 
 /**
  * Parses a coordinate pair from query arguments and optionally transforms it.
- * @param {List} coordinatePair Coordinate pair.
+ * @param {Array<string>} coordinatePair Coordinate pair.
  * @param {object} query Request query parameters.
  * @param {Function} transformer Optional transform function.
+ * @returns {Array<number>|null} Transformed coordinate pair or null if invalid.
  */
-const parseCoordinates = (coordinatePair, query, transformer) => {
+function parseCoordinates(coordinatePair, query, transformer) {
   const parsedCoordinates = parseCoordinatePair(coordinatePair, query);
 
   // Transform coordinates
@@ -161,14 +188,15 @@ const parseCoordinates = (coordinatePair, query, transformer) => {
   }
 
   return parsedCoordinates;
-};
+}
 
 /**
  * Parses paths provided via query into a list of path objects.
  * @param {object} query Request query parameters.
  * @param {Function} transformer Optional transform function.
+ * @returns {Array<Array<Array<number>>>} Array of paths.
  */
-const extractPathsFromQuery = (query, transformer) => {
+function extractPathsFromQuery(query, transformer) {
   // Initiate paths array
   const paths = [];
   // Return an empty list if no paths have been provided
@@ -220,17 +248,17 @@ const extractPathsFromQuery = (query, transformer) => {
     }
   }
   return paths;
-};
-
+}
 /**
  * Parses marker options provided via query and sets corresponding attributes
  * on marker object.
  * Options adhere to the following format
  * [optionName]:[optionValue]
- * @param {List[String]} optionsList List of option strings.
+ * @param {Array<string>} optionsList List of option strings.
  * @param {object} marker Marker object to configure.
+ * @returns {void}
  */
-const parseMarkerOptions = (optionsList, marker) => {
+function parseMarkerOptions(optionsList, marker) {
   for (const options of optionsList) {
     const optionParts = options.split(':');
     // Ensure we got an option name and value
@@ -257,15 +285,16 @@ const parseMarkerOptions = (optionsList, marker) => {
         break;
     }
   }
-};
+}
 
 /**
  * Parses markers provided via query into a list of marker objects.
  * @param {object} query Request query parameters.
  * @param {object} options Configuration options.
  * @param {Function} transformer Optional transform function.
+ * @returns {Array<object>} An array of marker objects.
  */
-const extractMarkersFromQuery = (query, options, transformer) => {
+function extractMarkersFromQuery(query, options, transformer) {
   // Return an empty list if no markers have been provided
   if (!query.marker) {
     return [];
@@ -341,9 +370,16 @@ const extractMarkersFromQuery = (query, options, transformer) => {
     markers.push(marker);
   }
   return markers;
-};
-
-const calcZForBBox = (bbox, w, h, query) => {
+}
+/**
+ * Calculates the zoom level for a given bounding box.
+ * @param {Array<number>} bbox Bounding box as [minx, miny, maxx, maxy].
+ * @param {number} w Width of the image.
+ * @param {number} h Height of the image.
+ * @param {object} query Request query parameters.
+ * @returns {number} Calculated zoom level.
+ */
+function calcZForBBox(bbox, w, h, query) {
   let z = 25;
 
   const padding = query.padding !== undefined ? parseFloat(query.padding) : 0.1;
@@ -362,9 +398,27 @@ const calcZForBBox = (bbox, w, h, query) => {
   z = Math.max(Math.log(Math.max(w, h) / 256) / Math.LN2, Math.min(25, z));
 
   return z;
-};
+}
 
-const respondImage = (
+/**
+ * Responds with an image.
+ * @param {object} options Configuration options.
+ * @param {object} item Item object containing map and other information.
+ * @param {number} z Zoom level.
+ * @param {number} lon Longitude of the center.
+ * @param {number} lat Latitude of the center.
+ * @param {number} bearing Map bearing.
+ * @param {number} pitch Map pitch.
+ * @param {number} width Width of the image.
+ * @param {number} height Height of the image.
+ * @param {number} scale Scale factor.
+ * @param {string} format Image format.
+ * @param {object} res Express response object.
+ * @param {Buffer|null} overlay Optional overlay image.
+ * @param {string} mode Rendering mode ('tile' or 'static').
+ * @returns {Promise<void>}
+ */
+async function respondImage(
   options,
   item,
   z,
@@ -379,7 +433,7 @@ const respondImage = (
   res,
   overlay = null,
   mode = 'tile',
-) => {
+) {
   if (
     Math.abs(lon) > 180 ||
     Math.abs(lat) > 85.06 ||
@@ -412,7 +466,8 @@ const respondImage = (
   } else {
     pool = item.map.renderersStatic[scale];
   }
-  pool.acquire((err, renderer) => {
+
+  pool.acquire(async (err, renderer) => {
     // For 512px tiles, use the actual maplibre-native zoom. For 256px tiles, use zoom - 1
     let mlglZ;
     if (width === 512) {
@@ -471,8 +526,8 @@ const respondImage = (
           height: height * scale,
         });
       }
-
       // HACK(Part 2) 256px tiles are a zoom level lower than maplibre-native default tiles. this hack allows tileserver-gl to support zoom 0 256px tiles, which would actually be zoom -1 in maplibre-native. Since zoom -1 isn't supported, a double sized zoom 0 tile is requested and resized here.
+
       if (z === 0 && width === 256) {
         image.resize(width * scale, height * scale);
       }
@@ -503,14 +558,35 @@ const respondImage = (
         image.composite(composites);
       }
 
-      const formatQuality = (options.formatQuality || {})[format];
+      // Legacy formatQuality is deprecated but still works
+      const formatQualities = options.formatQuality || {};
+      if (Object.keys(formatQualities).length !== 0) {
+        console.log(
+          'WARNING: The formatQuality option is deprecated and has been replaced with formatOptions. Please see the documentation. The values from formatQuality will be used if a quality setting is not provided via formatOptions.',
+        );
+      }
+      const formatQuality = formatQualities[format];
+
+      const formatOptions = (options.formatOptions || {})[format] || {};
 
       if (format === 'png') {
-        image.png({ adaptiveFiltering: false });
+        image.png({
+          progressive: formatOptions.progressive,
+          compressionLevel: formatOptions.compressionLevel,
+          adaptiveFiltering: formatOptions.adaptiveFiltering,
+          palette: formatOptions.palette,
+          quality: formatOptions.quality,
+          effort: formatOptions.effort,
+          colors: formatOptions.colors,
+          dither: formatOptions.dither,
+        });
       } else if (format === 'jpeg') {
-        image.jpeg({ quality: formatQuality || 80 });
+        image.jpeg({
+          quality: formatOptions.quality || formatQuality || 80,
+          progressive: formatOptions.progressive,
+        });
       } else if (format === 'webp') {
-        image.webp({ quality: formatQuality || 90 });
+        image.webp({ quality: formatOptions.quality || formatQuality || 90 });
       }
       image.toBuffer((err, buffer, info) => {
         if (!buffer) {
@@ -525,320 +601,410 @@ const respondImage = (
       });
     });
   });
-};
+}
 
+/**
+ * Handles requests for tile images.
+ * @param {object} options - Configuration options for the server.
+ * @param {object} repo - The repository object holding style data.
+ * @param {object} req - Express request object.
+ * @param {string} req.params.id - The id of the style.
+ * @param {string} req.params.p1 - The tile size parameter, if available.
+ * @param {string} req.params.p2 - The z parameter.
+ * @param {string} req.params.p3 - The x parameter.
+ * @param {string} req.params.p4 - The y parameter.
+ * @param {string} req.params.scale - The scale parameter.
+ * @param {string} req.params.format - The format of the image.
+ * @param {object} res - Express response object.
+ * @param {Function} next - Express next middleware function.
+ * @param {number} maxScaleFactor - The maximum scale factor allowed.
+ * @param defailtTileSize
+ * @returns {Promise<void>}
+ */
+async function handleTileRequest(
+  options,
+  repo,
+  req,
+  res,
+  next,
+  maxScaleFactor,
+  defailtTileSize,
+) {
+  const {
+    id,
+    p1: tileSize,
+    p2: zParam,
+    p3: xParam,
+    p4: yParam,
+    scale: scaleParam,
+    format,
+  } = req.params;
+  const item = repo[id];
+  if (!item) {
+    return res.sendStatus(404);
+  }
+
+  const modifiedSince = req.get('if-modified-since');
+  const cc = req.get('cache-control');
+  if (modifiedSince && (!cc || cc.indexOf('no-cache') === -1)) {
+    if (
+      new Date(item.lastModified).getTime() ===
+      new Date(modifiedSince).getTime()
+    ) {
+      return res.sendStatus(304);
+    }
+  }
+  const z = parseFloat(zParam) | 0;
+  const x = parseFloat(xParam) | 0;
+  const y = parseFloat(yParam) | 0;
+  const scale = allowedScales(scaleParam, maxScaleFactor);
+
+  let parsedTileSize = parseInt(defailtTileSize, 10);
+  if (tileSize) {
+    parsedTileSize = parseInt(allowedTileSizes(tileSize), 10);
+
+    if (parsedTileSize == null) {
+      return res.status(400).send('Invalid Tile Size');
+    }
+  }
+
+  if (
+    scale == null ||
+    z < 0 ||
+    x < 0 ||
+    y < 0 ||
+    z > 22 ||
+    x >= Math.pow(2, z) ||
+    y >= Math.pow(2, z)
+  ) {
+    return res.status(400).send('Out of bounds');
+  }
+
+  const tileCenter = mercator.ll(
+    [((x + 0.5) / (1 << z)) * (256 << z), ((y + 0.5) / (1 << z)) * (256 << z)],
+    z,
+  );
+
+  // prettier-ignore
+  return await respondImage(
+    options, item, z, tileCenter[0], tileCenter[1], 0, 0, parsedTileSize, parsedTileSize, scale, format, res,
+  );
+}
+
+/**
+ * Handles requests for static map images.
+ * @param {object} options - Configuration options for the server.
+ * @param {object} repo - The repository object holding style data.
+ * @param {object} req - Express request object.
+ * @param {object} res - Express response object.
+ * @param {string} req.params.p2 - The raw or static parameter.
+ * @param {string} req.params.p3 - The staticType parameter.
+ * @param {string} req.params.p4 - The width parameter.
+ * @param {string} req.params.p5 - The height parameter.
+ * @param {string} req.params.scale - The scale parameter.
+ * @param {string} req.params.format - The format of the image.
+ * @param {Function} next - Express next middleware function.
+ * @param {number} maxScaleFactor - The maximum scale factor allowed.
+ * @param verbose
+ * @returns {Promise<void>}
+ */
+async function handleStaticRequest(
+  options,
+  repo,
+  req,
+  res,
+  next,
+  maxScaleFactor,
+) {
+  const {
+    id,
+    p2: raw,
+    p3: staticType,
+    p4: widthAndHeight,
+    scale: scaleParam,
+    format,
+  } = req.params;
+  const item = repo[id];
+
+  let parsedWidth = null;
+  let parsedHeight = null;
+  if (widthAndHeight) {
+    const sizeMatch = widthAndHeight.match(/^(\d+)x(\d+)$/);
+    if (sizeMatch) {
+      const width = parseInt(sizeMatch[1], 10);
+      const height = parseInt(sizeMatch[2], 10);
+      if (
+        isNaN(width) ||
+        isNaN(height) ||
+        width !== parseFloat(sizeMatch[1]) ||
+        height !== parseFloat(sizeMatch[2])
+      ) {
+        return res
+          .status(400)
+          .send('Invalid width or height provided in size parameter');
+      }
+      parsedWidth = width;
+      parsedHeight = height;
+    } else {
+      return res
+        .status(400)
+        .send('Invalid width or height provided in size parameter');
+    }
+  } else {
+    return res
+      .status(400)
+      .send('Invalid width or height provided in size parameter');
+  }
+
+  const scale = allowedScales(scaleParam, maxScaleFactor);
+  let isRaw = raw === 'raw';
+
+  const staticTypeMatch = staticType.match(staticTypeRegex);
+  if (!item || !format || !scale || !staticTypeMatch?.groups) {
+    return res.sendStatus(404);
+  }
+
+  if (staticTypeMatch.groups.lon) {
+    // Center Based Static Image
+    const z = parseFloat(staticTypeMatch.groups.zoom) || 0;
+    let x = parseFloat(staticTypeMatch.groups.lon) || 0;
+    let y = parseFloat(staticTypeMatch.groups.lat) || 0;
+    const bearing = parseFloat(staticTypeMatch.groups.bearing) || 0;
+    const pitch = parseInt(staticTypeMatch.groups.pitch) || 0;
+    if (z < 0) {
+      return res.status(404).send('Invalid zoom');
+    }
+
+    const transformer = isRaw
+      ? mercator.inverse.bind(mercator)
+      : item.dataProjWGStoInternalWGS;
+
+    if (transformer) {
+      const ll = transformer([x, y]);
+      x = ll[0];
+      y = ll[1];
+    }
+
+    const paths = extractPathsFromQuery(req.query, transformer);
+    const markers = extractMarkersFromQuery(req.query, options, transformer);
+    // prettier-ignore
+    const overlay = await renderOverlay(
+     z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query,
+   );
+
+    // prettier-ignore
+    return await respondImage(
+    options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static',
+     );
+  } else if (staticTypeMatch.groups.minx) {
+    // Area Based Static Image
+    const minx = parseFloat(staticTypeMatch.groups.minx) || 0;
+    const miny = parseFloat(staticTypeMatch.groups.miny) || 0;
+    const maxx = parseFloat(staticTypeMatch.groups.maxx) || 0;
+    const maxy = parseFloat(staticTypeMatch.groups.maxy) || 0;
+    const bbox = [minx, miny, maxx, maxy];
+    let center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
+
+    const transformer = isRaw
+      ? mercator.inverse.bind(mercator)
+      : item.dataProjWGStoInternalWGS;
+
+    if (transformer) {
+      const minCorner = transformer(bbox.slice(0, 2));
+      const maxCorner = transformer(bbox.slice(2));
+      bbox[0] = minCorner[0];
+      bbox[1] = minCorner[1];
+      bbox[2] = maxCorner[0];
+      bbox[3] = maxCorner[1];
+      center = transformer(center);
+    }
+
+    const z = calcZForBBox(bbox, parsedWidth, parsedHeight, req.query);
+    const x = center[0];
+    const y = center[1];
+    const bearing = 0;
+    const pitch = 0;
+
+    const paths = extractPathsFromQuery(req.query, transformer);
+    const markers = extractMarkersFromQuery(req.query, options, transformer);
+    // prettier-ignore
+    const overlay = await renderOverlay(
+      z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query,
+      );
+
+    // prettier-ignore
+    return await respondImage(
+      options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static',
+     );
+  } else if (staticTypeMatch.groups.auto) {
+    // Area Static Image
+    const bearing = 0;
+    const pitch = 0;
+
+    const transformer = isRaw
+      ? mercator.inverse.bind(mercator)
+      : item.dataProjWGStoInternalWGS;
+
+    const paths = extractPathsFromQuery(req.query, transformer);
+    const markers = extractMarkersFromQuery(req.query, options, transformer);
+
+    // Extract coordinates from markers
+    const markerCoordinates = [];
+    for (const marker of markers) {
+      markerCoordinates.push(marker.location);
+    }
+
+    // Create array with coordinates from markers and path
+    const coords = [].concat(paths.flat()).concat(markerCoordinates);
+
+    // Check if we have at least one coordinate to calculate a bounding box
+    if (coords.length < 1) {
+      return res.status(400).send('No coordinates provided');
+    }
+
+    const bbox = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const pair of coords) {
+      bbox[0] = Math.min(bbox[0], pair[0]);
+      bbox[1] = Math.min(bbox[1], pair[1]);
+      bbox[2] = Math.max(bbox[2], pair[0]);
+      bbox[3] = Math.max(bbox[3], pair[1]);
+    }
+
+    const bbox_ = mercator.convert(bbox, '900913');
+    const center = mercator.inverse([
+      (bbox_[0] + bbox_[2]) / 2,
+      (bbox_[1] + bbox_[3]) / 2,
+    ]);
+
+    // Calculate zoom level
+    const maxZoom = parseFloat(req.query.maxzoom);
+    let z = calcZForBBox(bbox, parsedWidth, parsedHeight, req.query);
+    if (maxZoom > 0) {
+      z = Math.min(z, maxZoom);
+    }
+
+    const x = center[0];
+    const y = center[1];
+
+    // prettier-ignore
+    const overlay = await renderOverlay(
+      z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query,
+    );
+
+    // prettier-ignore
+    return await respondImage(
+        options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static',
+      );
+  } else {
+    return res.sendStatus(404);
+  }
+}
 const existingFonts = {};
 let maxScaleFactor = 2;
 
 export const serve_rendered = {
-  init: async (options, repo) => {
+  /**
+   * Initializes the serve_rendered module.
+   * @param {object} options Configuration options.
+   * @param {object} repo Repository object.
+   * @param {object} programOpts - An object containing the program options.
+   * @returns {Promise<express.Application>} A promise that resolves to the Express app.
+   */
+  init: async function (options, repo, programOpts) {
+    const { verbose, tileSize: defailtTileSize = 256 } = programOpts;
     maxScaleFactor = Math.min(Math.floor(options.maxScaleFactor || 3), 9);
-    let scalePattern = '';
-    for (let i = 2; i <= maxScaleFactor; i++) {
-      scalePattern += i.toFixed();
-    }
-    scalePattern = `@[${scalePattern}]x`;
-
     const app = express().disable('x-powered-by');
 
+    /**
+     * Handles requests for tile images.
+     * @param {object} req - Express request object.
+     * @param {object} res - Express response object.
+     * @param {string} req.params.id - The id of the style.
+     * @param {string} [req.params.p1] - The tile size or static parameter, if available.
+     * @param {string} req.params.p2 - The z, static, or raw parameter.
+     * @param {string} req.params.p3 - The x or staticType parameter.
+     * @param {string} req.params.p4 - The y or width parameter.
+     * @param {string} req.params.scale - The scale parameter.
+     * @param {string} req.params.format - The format of the image.
+     * @returns {Promise<void>}
+     */
     app.get(
-      `/:id/(:tileSize(256|512)/)?:z(\\d+)/:x(\\d+)/:y(\\d+):scale(${scalePattern})?.:format([\\w]+)`,
-      (req, res, next) => {
-        const item = repo[req.params.id];
-        if (!item) {
-          return res.sendStatus(404);
-        }
-
-        const modifiedSince = req.get('if-modified-since');
-        const cc = req.get('cache-control');
-        if (modifiedSince && (!cc || cc.indexOf('no-cache') === -1)) {
-          if (new Date(item.lastModified) <= new Date(modifiedSince)) {
-            return res.sendStatus(304);
+      `/:id{/:p1}/:p2/:p3/:p4{@:scale}{.:format}`,
+      async (req, res, next) => {
+        try {
+          const { p1, p2, id, p3, p4, scale, format } = req.params;
+          const requestType =
+            (!p1 && p2 === 'static') || (p1 === 'static' && p2 === 'raw')
+              ? 'static'
+              : 'tile';
+          if (verbose) {
+            console.log(
+              `Handling rendered %s request for: /styles/%s%s/%s/%s/%s%s.%s`,
+              requestType,
+              String(id).replace(/\n|\r/g, ''),
+              p1 ? '/' + String(p1).replace(/\n|\r/g, '') : '',
+              String(p2).replace(/\n|\r/g, ''),
+              String(p3).replace(/\n|\r/g, ''),
+              String(p4).replace(/\n|\r/g, ''),
+              scale ? '@' + String(scale).replace(/\n|\r/g, '') : '',
+              String(format).replace(/\n|\r/g, ''),
+            );
           }
+
+          if (requestType === 'static') {
+            // Route to static if p2 is static
+            if (options.serveStaticMaps !== false) {
+              return handleStaticRequest(
+                options,
+                repo,
+                req,
+                res,
+                next,
+                maxScaleFactor,
+              );
+            }
+            return res.sendStatus(404);
+          }
+
+          return handleTileRequest(
+            options,
+            repo,
+            req,
+            res,
+            next,
+            maxScaleFactor,
+            defailtTileSize,
+          );
+        } catch (e) {
+          console.log(e);
+          return next(e);
         }
-
-        const z = req.params.z | 0;
-        const x = req.params.x | 0;
-        const y = req.params.y | 0;
-        const scale = getScale(req.params.scale);
-        const format = req.params.format;
-        const tileSize = parseInt(req.params.tileSize, 10) || 256;
-
-        if (
-          z < 0 ||
-          x < 0 ||
-          y < 0 ||
-          z > 22 ||
-          x >= Math.pow(2, z) ||
-          y >= Math.pow(2, z)
-        ) {
-          return res.status(404).send('Out of bounds');
-        }
-
-        const tileCenter = mercator.ll(
-          [
-            ((x + 0.5) / (1 << z)) * (256 << z),
-            ((y + 0.5) / (1 << z)) * (256 << z),
-          ],
-          z,
-        );
-
-        // prettier-ignore
-        return respondImage(
-          options, item, z, tileCenter[0], tileCenter[1], 0, 0, tileSize, tileSize, scale, format, res,
-        );
       },
     );
 
-    if (options.serveStaticMaps !== false) {
-      const staticPattern = `/:id/static/:raw(raw)?/%s/:width(\\d+)x:height(\\d+):scale(${scalePattern})?.:format([\\w]+)`;
-
-      const centerPattern = util.format(
-        ':x(%s),:y(%s),:z(%s)(@:bearing(%s)(,:pitch(%s))?)?',
-        FLOAT_PATTERN,
-        FLOAT_PATTERN,
-        FLOAT_PATTERN,
-        FLOAT_PATTERN,
-        FLOAT_PATTERN,
-      );
-
-      app.get(
-        util.format(staticPattern, centerPattern),
-        async (req, res, next) => {
-          try {
-            const item = repo[req.params.id];
-            if (!item) {
-              return res.sendStatus(404);
-            }
-            const raw = req.params.raw;
-            const z = +req.params.z;
-            let x = +req.params.x;
-            let y = +req.params.y;
-            const bearing = +(req.params.bearing || '0');
-            const pitch = +(req.params.pitch || '0');
-            const w = req.params.width | 0;
-            const h = req.params.height | 0;
-            const scale = getScale(req.params.scale);
-            const format = req.params.format;
-
-            if (z < 0) {
-              return res.status(404).send('Invalid zoom');
-            }
-
-            const transformer = raw
-              ? mercator.inverse.bind(mercator)
-              : item.dataProjWGStoInternalWGS;
-
-            if (transformer) {
-              const ll = transformer([x, y]);
-              x = ll[0];
-              y = ll[1];
-            }
-
-            const paths = extractPathsFromQuery(req.query, transformer);
-            const markers = extractMarkersFromQuery(
-              req.query,
-              options,
-              transformer,
-            );
-
-            // prettier-ignore
-            const overlay = await renderOverlay(
-              z, x, y, bearing, pitch, w, h, scale, paths, markers, req.query,
-            );
-
-            // prettier-ignore
-            return respondImage(
-              options, item, z, x, y, bearing, pitch, w, h, scale, format, res, overlay, 'static',
-            );
-          } catch (e) {
-            next(e);
-          }
-        },
-      );
-
-      const serveBounds = async (req, res, next) => {
-        try {
-          const item = repo[req.params.id];
-          if (!item) {
-            return res.sendStatus(404);
-          }
-          const raw = req.params.raw;
-          const bbox = [
-            +req.params.minx,
-            +req.params.miny,
-            +req.params.maxx,
-            +req.params.maxy,
-          ];
-          let center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
-
-          const transformer = raw
-            ? mercator.inverse.bind(mercator)
-            : item.dataProjWGStoInternalWGS;
-
-          if (transformer) {
-            const minCorner = transformer(bbox.slice(0, 2));
-            const maxCorner = transformer(bbox.slice(2));
-            bbox[0] = minCorner[0];
-            bbox[1] = minCorner[1];
-            bbox[2] = maxCorner[0];
-            bbox[3] = maxCorner[1];
-            center = transformer(center);
-          }
-
-          const w = req.params.width | 0;
-          const h = req.params.height | 0;
-          const scale = getScale(req.params.scale);
-          const format = req.params.format;
-
-          const z = calcZForBBox(bbox, w, h, req.query);
-          const x = center[0];
-          const y = center[1];
-          const bearing = 0;
-          const pitch = 0;
-
-          const paths = extractPathsFromQuery(req.query, transformer);
-          const markers = extractMarkersFromQuery(
-            req.query,
-            options,
-            transformer,
-          );
-
-          // prettier-ignore
-          const overlay = await renderOverlay(
-            z, x, y, bearing, pitch, w, h, scale, paths, markers, req.query,
-          );
-
-          // prettier-ignore
-          return respondImage(
-            options, item, z, x, y, bearing, pitch, w, h, scale, format, res, overlay, 'static',
-          );
-        } catch (e) {
-          next(e);
-        }
-      };
-
-      const boundsPattern = util.format(
-        ':minx(%s),:miny(%s),:maxx(%s),:maxy(%s)',
-        FLOAT_PATTERN,
-        FLOAT_PATTERN,
-        FLOAT_PATTERN,
-        FLOAT_PATTERN,
-      );
-
-      app.get(util.format(staticPattern, boundsPattern), serveBounds);
-
-      app.get('/:id/static/', (req, res, next) => {
-        for (const key in req.query) {
-          req.query[key.toLowerCase()] = req.query[key];
-        }
-        req.params.raw = true;
-        req.params.format = (req.query.format || 'image/png').split('/').pop();
-        const bbox = (req.query.bbox || '').split(',');
-        req.params.minx = bbox[0];
-        req.params.miny = bbox[1];
-        req.params.maxx = bbox[2];
-        req.params.maxy = bbox[3];
-        req.params.width = req.query.width || '256';
-        req.params.height = req.query.height || '256';
-        if (req.query.scale) {
-          req.params.width /= req.query.scale;
-          req.params.height /= req.query.scale;
-          req.params.scale = `@${req.query.scale}`;
-        }
-
-        return serveBounds(req, res, next);
-      });
-
-      const autoPattern = 'auto';
-
-      app.get(
-        util.format(staticPattern, autoPattern),
-        async (req, res, next) => {
-          try {
-            const item = repo[req.params.id];
-            if (!item) {
-              return res.sendStatus(404);
-            }
-            const raw = req.params.raw;
-            const w = req.params.width | 0;
-            const h = req.params.height | 0;
-            const bearing = 0;
-            const pitch = 0;
-            const scale = getScale(req.params.scale);
-            const format = req.params.format;
-
-            const transformer = raw
-              ? mercator.inverse.bind(mercator)
-              : item.dataProjWGStoInternalWGS;
-
-            const paths = extractPathsFromQuery(req.query, transformer);
-            const markers = extractMarkersFromQuery(
-              req.query,
-              options,
-              transformer,
-            );
-
-            // Extract coordinates from markers
-            const markerCoordinates = [];
-            for (const marker of markers) {
-              markerCoordinates.push(marker.location);
-            }
-
-            // Create array with coordinates from markers and path
-            const coords = [].concat(paths.flat()).concat(markerCoordinates);
-
-            // Check if we have at least one coordinate to calculate a bounding box
-            if (coords.length < 1) {
-              return res.status(400).send('No coordinates provided');
-            }
-
-            const bbox = [Infinity, Infinity, -Infinity, -Infinity];
-            for (const pair of coords) {
-              bbox[0] = Math.min(bbox[0], pair[0]);
-              bbox[1] = Math.min(bbox[1], pair[1]);
-              bbox[2] = Math.max(bbox[2], pair[0]);
-              bbox[3] = Math.max(bbox[3], pair[1]);
-            }
-
-            const bbox_ = mercator.convert(bbox, '900913');
-            const center = mercator.inverse([
-              (bbox_[0] + bbox_[2]) / 2,
-              (bbox_[1] + bbox_[3]) / 2,
-            ]);
-
-            // Calculate zoom level
-            const maxZoom = parseFloat(req.query.maxzoom);
-            let z = calcZForBBox(bbox, w, h, req.query);
-            if (maxZoom > 0) {
-              z = Math.min(z, maxZoom);
-            }
-
-            const x = center[0];
-            const y = center[1];
-
-            // prettier-ignore
-            const overlay = await renderOverlay(
-              z, x, y, bearing, pitch, w, h, scale, paths, markers, req.query,
-            );
-
-            // prettier-ignore
-            return respondImage(
-              options, item, z, x, y, bearing, pitch, w, h, scale, format, res, overlay, 'static',
-            );
-          } catch (e) {
-            next(e);
-          }
-        },
-      );
-    }
-
-    app.get('/(:tileSize(256|512)/)?:id.json', (req, res, next) => {
+    /**
+     * Handles requests for rendered tilejson endpoint.
+     * @param {object} req - Express request object.
+     * @param {object} res - Express response object.
+     * @param {string} req.params.id - The id of the tilejson
+     * @param {string} [req.params.tileSize] - The size of the tile, if specified.
+     * @returns {void}
+     */
+    app.get('{/:tileSize}/:id.json', (req, res, next) => {
       const item = repo[req.params.id];
       if (!item) {
         return res.sendStatus(404);
       }
       const tileSize = parseInt(req.params.tileSize, 10) || undefined;
+      if (verbose) {
+        console.log(
+          `Handling rendered tilejson request for: /styles/%s%s.json`,
+          req.params.tileSize
+            ? String(req.params.tileSize).replace(/\n|\r/g, '') + '/'
+            : '',
+          String(req.params.id).replace(/\n|\r/g, ''),
+        );
+      }
       const info = clone(item.tileJSON);
       info.tiles = getTileUrls(
         req,
@@ -855,7 +1021,17 @@ export const serve_rendered = {
     Object.assign(existingFonts, fonts);
     return app;
   },
-  add: async (options, repo, params, id, publicUrl, dataResolver) => {
+  /**
+   * Adds a new item to the repository.
+   * @param {object} options Configuration options.
+   * @param {object} repo Repository object.
+   * @param {object} params Parameters object.
+   * @param {string} id ID of the item.
+   * @param {object} programOpts - An object containing the program options
+   * @param {Function} dataResolver Function to resolve data.
+   * @returns {Promise<void>}
+   */
+  add: async function (options, repo, params, id, programOpts, dataResolver) {
     const map = {
       renderers: [],
       renderersStatic: [],
@@ -863,24 +1039,48 @@ export const serve_rendered = {
       sourceTypes: {},
     };
 
+    const { publicUrl, verbose } = programOpts;
+
     let styleJSON;
+    /**
+     * Creates a pool of renderers.
+     * @param {number} ratio Pixel ratio
+     * @param {string} mode Rendering mode ('tile' or 'static').
+     * @param {number} min Minimum pool size.
+     * @param {number} max Maximum pool size.
+     * @returns {object} The created pool
+     */
     const createPool = (ratio, mode, min, max) => {
+      /**
+       * Creates a renderer
+       * @param {number} ratio Pixel ratio
+       * @param {Function} createCallback Function that returns the renderer when created
+       *  @returns {void}
+       */
       const createRenderer = (ratio, createCallback) => {
         const renderer = new mlgl.Map({
           mode,
           ratio,
           request: async (req, callback) => {
             const protocol = req.url.split(':')[0];
-            // console.log('Handling request:', req);
+            if (verbose) {
+              console.log('Handling request:', req);
+            }
             if (protocol === 'sprites') {
               const dir = options.paths[protocol];
-              const file = unescape(req.url).substring(protocol.length + 3);
-              fs.readFile(path.join(dir, file), (err, data) => {
-                callback(err, { data: data });
-              });
+              const file = decodeURIComponent(req.url).substring(
+                protocol.length + 3,
+              );
+              readFile(path.join(dir, file))
+                .then((data) => {
+                  callback(null, { data: data });
+                })
+                .catch((err) => {
+                  callback(err, null);
+                });
             } else if (protocol === 'fonts') {
               const parts = req.url.split('/');
-              const fontstack = unescape(parts[2]);
+              const fontstack = decodeURIComponent(parts[2]);
               const range = parts[3].split('.')[0];
 
               try {
@@ -907,88 +1107,57 @@ export const serve_rendered = {
               const y = parts[5].split('.')[0] | 0;
               const format = parts[5].split('.')[1];
 
-              if (sourceType === 'pmtiles') {
-                let tileinfo = await getPMtilesTile(source, z, x, y);
-                let data = tileinfo.data;
-                let headers = tileinfo.header;
-                if (data == undefined) {
-                  if (options.verbose)
-                    console.log('MBTiles error, serving empty', err);
-                  createEmptyResponse(
-                    sourceInfo.format,
-                    sourceInfo.color,
-                    callback,
+              const fetchTile = await fetchTileData(
+                source,
+                sourceType,
+                z,
+                x,
+                y,
+              );
+              if (fetchTile == null) {
+                if (verbose) {
+                  console.log(
+                    'fetchTile error on %s, serving empty response',
+                    req.url,
                   );
-                  return;
-                } else {
-                  const response = {};
-                  response.data = data;
-                  if (headers['Last-Modified']) {
-                    response.modified = new Date(headers['Last-Modified']);
-                  }
-
-                  if (format === 'pbf') {
-                    if (options.dataDecoratorFunc) {
-                      response.data = options.dataDecoratorFunc(
-                        sourceId,
-                        'data',
-                        response.data,
-                        z,
-                        x,
-                        y,
-                      );
-                    }
-                  }
-
-                  callback(null, response);
                 }
-              } else if (sourceType === 'mbtiles') {
-                source.getTile(z, x, y, (err, data, headers) => {
-                  if (err) {
-                    if (options.verbose)
-                      console.log('MBTiles error, serving empty', err);
-                    createEmptyResponse(
-                      sourceInfo.format,
-                      sourceInfo.color,
-                      callback,
-                    );
-                    return;
-                  }
-
-                  const response = {};
-                  if (headers['Last-Modified']) {
-                    response.modified = new Date(headers['Last-Modified']);
-                  }
-
-                  if (format === 'pbf') {
-                    try {
-                      response.data = zlib.unzipSync(data);
-                    } catch (err) {
-                      console.log(
-                        'Skipping incorrect header for tile mbtiles://%s/%s/%s/%s.pbf',
-                        id,
-                        z,
-                        x,
-                        y,
-                      );
-                    }
-                    if (options.dataDecoratorFunc) {
-                      response.data = options.dataDecoratorFunc(
-                        sourceId,
-                        'data',
-                        response.data,
-                        z,
-                        x,
-                        y,
-                      );
-                    }
-                  } else {
-                    response.data = data;
-                  }
-
-                  callback(null, response);
-                });
+                createEmptyResponse(
+                  sourceInfo.format,
+                  sourceInfo.color,
+                  callback,
+                );
+                return;
               }
+
+              const response = {};
+              response.data = fetchTile.data;
+              let headers = fetchTile.headers;
+
+              if (headers['Last-Modified']) {
+                response.modified = new Date(headers['Last-Modified']);
+              }
+
+              if (format === 'pbf') {
+                let isGzipped =
+                  response.data
+                    .slice(0, 2)
+                    .indexOf(Buffer.from([0x1f, 0x8b])) === 0;
+                if (isGzipped) {
+                  response.data = await gunzipP(response.data);
+                }
+                if (options.dataDecoratorFunc) {
+                  response.data = options.dataDecoratorFunc(
+                    sourceId,
+                    'data',
+                    response.data,
+                    z,
+                    x,
+                    y,
+                  );
+                }
+              }
+
+              callback(null, response);
             } else if (protocol === 'http' || protocol === 'https') {
               try {
                 const response = await axios.get(req.url, {
@@ -1020,6 +1189,29 @@ export const serve_rendered = {
                 const format = extensionToFormat[extension] || '';
                 createEmptyResponse(format, '', callback);
               }
+            } else if (protocol === 'file') {
+              const name = decodeURI(req.url).substring(protocol.length + 3);
+              const file = path.join(options.paths['files'], name);
+              if (await existsP(file)) {
+                const inputFileStats = await fsp.stat(file);
+                if (!inputFileStats.isFile() || inputFileStats.size === 0) {
+                  throw Error(
+                    `File is not valid: "${req.url}" - resolved to "${file}"`,
+                  );
+                }
+
+                readFile(file)
+                  .then((data) => {
+                    callback(null, { data: data });
+                  })
+                  .catch((err) => {
+                    callback(err, null);
+                  });
+              } else {
+                throw Error(
+                  `File does not exist: "${req.url}" - resolved to "${file}"`,
+                );
+              }
             }
           },
         });
@@ -1039,22 +1231,33 @@ export const serve_rendered = {
     const styleFile = params.style;
     const styleJSONPath = path.resolve(options.paths.styles, styleFile);
     try {
-      styleJSON = JSON.parse(fs.readFileSync(styleJSONPath));
+      styleJSON = JSON.parse(await fsp.readFile(styleJSONPath));
     } catch (e) {
       console.log('Error parsing style file');
       return false;
     }
 
-    if (styleJSON.sprite && !httpTester.test(styleJSON.sprite)) {
-      styleJSON.sprite =
-        'sprites://' +
-        styleJSON.sprite
-          .replace('{style}', path.basename(styleFile, '.json'))
-          .replace(
-            '{styleJsonFolder}',
-            path.relative(options.paths.sprites, path.dirname(styleJSONPath)),
-          );
+    if (styleJSON.sprite) {
+      if (!Array.isArray(styleJSON.sprite)) {
+        styleJSON.sprite = [{ id: 'default', url: styleJSON.sprite }];
+      }
+      styleJSON.sprite.forEach((spriteItem) => {
+        if (!httpTester.test(spriteItem.url)) {
+          spriteItem.url =
+            'sprites://' +
+            spriteItem.url
+              .replace('{style}', path.basename(styleFile, '.json'))
+              .replace(
+                '{styleJsonFolder}',
+                path.relative(
+                  options.paths.sprites,
+                  path.dirname(styleJSONPath),
+                ),
+              );
+        }
+      });
     }
+
     if (styleJSON.glyphs && !httpTester.test(styleJSON.glyphs)) {
       styleJSON.glyphs = `fonts://${styleJSON.glyphs}`;
     }
@@ -1101,7 +1304,6 @@ export const serve_rendered = {
     };
     repo[id] = repoobj;
 
-    const queue = [];
     for (const name of Object.keys(styleJSON.sources)) {
       let sourceType;
       let source = styleJSON.sources[name];
@@ -1134,7 +1336,7 @@ export const serve_rendered = {
         }
 
         if (!isValidHttpUrl(inputFile)) {
-          const inputFileStats = fs.statSync(inputFile);
+          const inputFileStats = await fsp.stat(inputFile);
           if (!inputFileStats.isFile() || inputFileStats.size === 0) {
             throw Error(`Not valid PMTiles file: "${inputFile}"`);
           }
@@ -1175,68 +1377,51 @@ export const serve_rendered = {
             }
           }
         } else {
-          queue.push(
-            new Promise((resolve, reject) => {
-              inputFile = path.resolve(options.paths.mbtiles, inputFile);
-              const inputFileStats = fs.statSync(inputFile);
-              if (!inputFileStats.isFile() || inputFileStats.size === 0) {
-                throw Error(`Not valid MBTiles file: "${inputFile}"`);
+          const inputFileStats = await fsp.stat(inputFile);
+          if (!inputFileStats.isFile() || inputFileStats.size === 0) {
+            throw Error(`Not valid MBTiles file: "${inputFile}"`);
+          }
+          const mbw = await openMbTilesWrapper(inputFile);
+          const info = await mbw.getInfo();
+          map.sources[name] = mbw.getMbTiles();
+          map.sourceTypes[name] = 'mbtiles';
+
+          if (!repoobj.dataProjWGStoInternalWGS && info.proj4) {
+            // how to do this for multiple sources with different proj4 defs?
+            const to3857 = proj4('EPSG:3857');
+            const toDataProj = proj4(info.proj4);
+            repoobj.dataProjWGStoInternalWGS = (xy) =>
+              to3857.inverse(toDataProj.forward(xy));
+          }
+
+          const type = source.type;
+          Object.assign(source, info);
+          source.type = type;
+          source.tiles = [
+            // meta url which will be detected when requested
+            `mbtiles://${name}/{z}/{x}/{y}.${info.format || 'pbf'}`,
+          ];
+          delete source.scheme;
+
+          if (options.dataDecoratorFunc) {
+            source = options.dataDecoratorFunc(name, 'tilejson', source);
+          }
+
+          if (
+            !attributionOverride &&
+            source.attribution &&
+            source.attribution.length > 0
+          ) {
+            if (!tileJSON.attribution.includes(source.attribution)) {
+              if (tileJSON.attribution.length > 0) {
+                tileJSON.attribution += ' | ';
               }
-              map.sources[name] = new MBTiles(inputFile + '?mode=ro', (err) => {
-                map.sources[name].getInfo((err, info) => {
-                  if (err) {
-                    console.error(err);
-                    return;
-                  }
-                  map.sourceTypes[name] = 'mbtiles';
-
-                  if (!repoobj.dataProjWGStoInternalWGS && info.proj4) {
-                    // how to do this for multiple sources with different proj4 defs?
-                    const to3857 = proj4('EPSG:3857');
-                    const toDataProj = proj4(info.proj4);
-                    repoobj.dataProjWGStoInternalWGS = (xy) =>
-                      to3857.inverse(toDataProj.forward(xy));
-                  }
-
-                  const type = source.type;
-                  Object.assign(source, info);
-                  source.type = type;
-                  source.tiles = [
-                    // meta url which will be detected when requested
-                    `mbtiles://${name}/{z}/{x}/{y}.${info.format || 'pbf'}`,
-                  ];
-                  delete source.scheme;
-
-                  if (options.dataDecoratorFunc) {
-                    source = options.dataDecoratorFunc(
-                      name,
-                      'tilejson',
-                      source,
-                    );
-                  }
-
-                  if (
-                    !attributionOverride &&
-                    source.attribution &&
-                    source.attribution.length > 0
-                  ) {
-                    if (!tileJSON.attribution.includes(source.attribution)) {
-                      if (tileJSON.attribution.length > 0) {
-                        tileJSON.attribution += ' | ';
-                      }
-                      tileJSON.attribution += source.attribution;
-                    }
-                  }
-                  resolve();
-                });
-              });
-            }),
-          );
+              tileJSON.attribution += source.attribution;
+            }
+          }
         }
       }
     }
-
-    await Promise.all(queue);
 
     // standard and @2x tiles are much more usual -> default to larger pools
     const minPoolSizes = options.minRendererPoolSizes || [8, 4, 2];
@@ -1255,7 +1440,13 @@ export const serve_rendered = {
       );
     }
   },
-  remove: (repo, id) => {
+  /**
+   * Removes an item from the repository.
+   * @param {object} repo Repository object.
+   * @param {string} id ID of the item to remove.
+   * @returns {void}
+   */
+  remove: function (repo, id) {
     const item = repo[id];
     if (item) {
       item.map.renderers.forEach((pool) => {
@@ -1266,5 +1457,77 @@ export const serve_rendered = {
       });
     }
     delete repo[id];
+  },
+
+  /**
+   * Get the elevation of terrain tile data by rendering it to a canvas image
+   * @param {object} data The background color (or empty string for transparent).
+   * @param {object} param Required parameters (coordinates e.g.)
+   * @returns {object}
+   */
+  getTerrainElevation: async function (data, param) {
+    return await new Promise(async (resolve, reject) => {
+      const image = new Image();
+      image.onload = async () => {
+        const canvas = createCanvas(param['tile_size'], param['tile_size']);
+        const context = canvas.getContext('2d');
+        context.drawImage(image, 0, 0);
+
+        // calculate pixel coordinate of tile,
+        // see https://developers.google.com/maps/documentation/javascript/examples/map-coordinates
+        let siny = Math.sin((param['lat'] * Math.PI) / 180);
+        // Truncating to 0.9999 effectively limits latitude to 89.189. This is
+        // about a third of a tile past the edge of the world tile.
+        siny = Math.min(Math.max(siny, -0.9999), 0.9999);
+        const xWorld = param['tile_size'] * (0.5 + param['long'] / 360);
+        const yWorld =
+          param['tile_size'] *
+          (0.5 - Math.log((1 + siny) / (1 - siny)) / (4 * Math.PI));
+
+        const scale = 1 << param['z'];
+
+        const xTile = Math.floor((xWorld * scale) / param['tile_size']);
+        const yTile = Math.floor((yWorld * scale) / param['tile_size']);
+
+        const xPixel = Math.floor(xWorld * scale) - xTile * param['tile_size'];
+        const yPixel = Math.floor(yWorld * scale) - yTile * param['tile_size'];
+        if (
+          xPixel < 0 ||
+          yPixel < 0 ||
+          xPixel >= param['tile_size'] ||
+          yPixel >= param['tile_size']
+        ) {
+          return reject('Out of bounds Pixel');
+        }
+        const imgdata = context.getImageData(xPixel, yPixel, 1, 1);
+        const red = imgdata.data[0];
+        const green = imgdata.data[1];
+        const blue = imgdata.data[2];
+        let elevation;
+        if (param['encoding'] === 'mapbox') {
+          elevation = -10000 + (red * 256 * 256 + green * 256 + blue) * 0.1;
+        } else if (param['encoding'] === 'terrarium') {
+          elevation = red * 256 + green + blue / 256 - 32768;
+        } else {
+          elevation = 'invalid encoding';
+        }
+        param['elevation'] = elevation;
+        param['red'] = red;
+        param['green'] = green;
+        param['blue'] = blue;
+        resolve(param);
+      };
+      image.onerror = (err) => reject(err);
+      if (param['format'] === 'webp') {
+        try {
+          const img = await sharp(data).toFormat('png').toBuffer();
+          image.src = img;
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        image.src = data;
+      }
+    });
   },
 };

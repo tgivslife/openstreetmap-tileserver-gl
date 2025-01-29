@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 'use strict';
 
-import os from 'os';
-process.env.UV_THREADPOOL_SIZE = Math.ceil(Math.max(4, os.cpus().length * 1.5));
-
 import fs from 'node:fs';
 import path from 'path';
 import fnv1a from '@sindresorhus/fnv1a';
@@ -19,25 +16,30 @@ import morgan from 'morgan';
 import { serve_data } from './serve_data.js';
 import { serve_style } from './serve_style.js';
 import { serve_font } from './serve_font.js';
-import { getTileUrls, getPublicUrl, isValidHttpUrl } from './utils.js';
+import {
+  allowedTileSizes,
+  getTileUrls,
+  getPublicUrl,
+  isValidHttpUrl,
+} from './utils.js';
 
 import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(
   fs.readFileSync(__dirname + '/../package.json', 'utf8'),
 );
-
 const isLight = packageJson.name.slice(-6) === '-light';
+
 const serve_rendered = (
   await import(`${!isLight ? `./serve_rendered.js` : `./serve_light.js`}`)
 ).serve_rendered;
 
 /**
- *
- * @param opts
+ *  Starts the server.
+ * @param {object} opts - Configuration options for the server.
+ * @returns {Promise<object>} - A promise that resolves to the server object.
  */
-function start(opts) {
+async function start(opts) {
   console.log('Starting server');
 
   const app = express().disable('x-powered-by');
@@ -73,7 +75,7 @@ function start(opts) {
       config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     } catch (e) {
       console.log('ERROR: Config file not found or invalid!');
-      console.log('       See README.md for instructions and sample data.');
+      console.log('   See README.md for instructions and sample data.');
       process.exit(1);
     }
   }
@@ -94,31 +96,31 @@ function start(opts) {
   paths.sprites = path.resolve(paths.root, paths.sprites || '');
   paths.mbtiles = path.resolve(paths.root, paths.mbtiles || '');
   paths.pmtiles = path.resolve(paths.root, paths.pmtiles || '');
-  paths.icons = path.resolve(paths.root, paths.icons || '');
+  paths.icons = paths.icons
+    ? path.resolve(paths.root, paths.icons)
+    : path.resolve(__dirname, '../public/resources/images');
+  paths.files = paths.files
+    ? path.resolve(paths.root, paths.files)
+    : path.resolve(__dirname, '../public/files');
 
   const startupPromises = [];
 
-  const checkPath = (type) => {
+  for (const type of Object.keys(paths)) {
     if (!fs.existsSync(paths[type])) {
       console.error(
         `The specified path for "${type}" does not exist (${paths[type]}).`,
       );
       process.exit(1);
     }
-  };
-  checkPath('styles');
-  checkPath('fonts');
-  checkPath('sprites');
-  checkPath('mbtiles');
-  checkPath('pmtiles');
-  checkPath('icons');
+  }
 
   /**
    * Recursively get all files within a directory.
    * Inspired by https://stackoverflow.com/a/45130990/10133863
    * @param {string} directory Absolute path to a directory to get files from.
+   * @returns {Promise<string[]>} - A promise that resolves to an array of file paths relative to the icon directory.
    */
-  const getFiles = async (directory) => {
+  async function getFiles(directory) {
     // Fetch all entries of the directory and attach type information
     const dirEntries = await fs.promises.readdir(directory, {
       withFileTypes: true,
@@ -137,7 +139,7 @@ function start(opts) {
 
     // Flatten the list of files to a single array
     return files.flat();
-  };
+  }
 
   // Load all available icons into a settings object
   startupPromises.push(
@@ -160,17 +162,25 @@ function start(opts) {
     app.use(cors());
   }
 
-  app.use('/data/', serve_data.init(options, serving.data));
-  app.use('/styles/', serve_style.init(options, serving.styles));
+  app.use('/data/', serve_data.init(options, serving.data, opts));
+  app.use('/files/', express.static(paths.files));
+  app.use('/styles/', serve_style.init(options, serving.styles, opts));
   if (!isLight) {
     startupPromises.push(
-      serve_rendered.init(options, serving.rendered).then((sub) => {
+      serve_rendered.init(options, serving.rendered, opts).then((sub) => {
         app.use('/styles/', sub);
       }),
     );
   }
-
-  const addStyle = (id, item, allowMoreData, reportFonts) => {
+  /**
+   * Adds a style to the server.
+   * @param {string} id - The ID of the style.
+   * @param {object} item - The style configuration object.
+   * @param {boolean} allowMoreData - Whether to allow adding more data sources.
+   * @param {boolean} reportFonts - Whether to report fonts.
+   * @returns {void}
+   */
+  function addStyle(id, item, allowMoreData, reportFonts) {
     let success = true;
     if (item.serve_data !== false) {
       success = serve_style.add(
@@ -178,7 +188,7 @@ function start(opts) {
         serving.styles,
         item,
         id,
-        opts.publicUrl,
+        opts,
         (styleSourceId, protocol) => {
           let dataItemId;
           for (const id of Object.keys(data)) {
@@ -235,7 +245,7 @@ function start(opts) {
             serving.rendered,
             item,
             id,
-            opts.publicUrl,
+            opts,
             function dataResolver(styleSourceId) {
               let fileType;
               let inputFile;
@@ -261,7 +271,7 @@ function start(opts) {
         item.serve_rendered = false;
       }
     }
-  };
+  }
 
   for (const id of Object.keys(config.styles || {})) {
     const item = config.styles[id];
@@ -272,13 +282,11 @@ function start(opts) {
 
     addStyle(id, item, true, true);
   }
-
   startupPromises.push(
-    serve_font(options, serving.fonts).then((sub) => {
+    serve_font(options, serving.fonts, opts).then((sub) => {
       app.use('/', sub);
     }),
   );
-
   for (const id of Object.keys(data)) {
     const item = data[id];
     const fileType = Object.keys(data[id])[0];
@@ -288,12 +296,8 @@ function start(opts) {
       );
       continue;
     }
-
-    startupPromises.push(
-      serve_data.add(options, serving.data, item, id, opts.publicUrl),
-    );
+    startupPromises.push(serve_data.add(options, serving.data, item, id, opts));
   }
-
   if (options.serveAllStyles) {
     fs.readdir(options.paths.styles, { withFileTypes: true }, (err, files) => {
       if (err) {
@@ -333,7 +337,13 @@ function start(opts) {
       }
     });
   }
-
+  /**
+   * Handles requests for a list of available styles.
+   * @param {object} req - Express request object.
+   * @param {object} res - Express response object.
+   * @param {string} [req.query.key] - Optional API key.
+   * @returns {void}
+   */
   app.get('/styles.json', (req, res, next) => {
     const result = [];
     const query = req.query.key
@@ -354,7 +364,15 @@ function start(opts) {
     res.send(result);
   });
 
-  const addTileJSONs = (arr, req, type, tileSize) => {
+  /**
+   * Adds TileJSON metadata to an array.
+   * @param {Array} arr - The array to add TileJSONs to
+   * @param {object} req - The express request object.
+   * @param {string} type - The type of resource
+   * @param {number} tileSize - The tile size.
+   * @returns {Array} - An array of TileJSON objects.
+   */
+  function addTileJSONs(arr, req, type, tileSize) {
     for (const id of Object.keys(serving[type])) {
       const info = clone(serving[type][id].tileJSON);
       let path = '';
@@ -377,20 +395,42 @@ function start(opts) {
       arr.push(info);
     }
     return arr;
-  };
+  }
 
-  app.get('/(:tileSize(256|512)/)?rendered.json', (req, res, next) => {
-    const tileSize = parseInt(req.params.tileSize, 10) || undefined;
-    res.send(addTileJSONs([], req, 'rendered', tileSize));
+  /**
+   * Handles requests for a rendered tilejson endpoint.
+   * @param {object} req - Express request object.
+   * @param {object} res - Express response object.
+   * @param {string} req.params.tileSize - Optional tile size parameter.
+   * @returns {void}
+   */
+  app.get('{/:tileSize}/rendered.json', (req, res, next) => {
+    const tileSize = allowedTileSizes(req.params['tileSize']);
+    res.send(addTileJSONs([], req, 'rendered', parseInt(tileSize, 10)));
   });
-  app.get('/data.json', (req, res, next) => {
+
+  /**
+   * Handles requests for a data tilejson endpoint.
+   * @param {object} req - Express request object.
+   * @param {object} res - Express response object.
+   * @returns {void}
+   */
+  app.get('/data.json', (req, res) => {
     res.send(addTileJSONs([], req, 'data', undefined));
   });
-  app.get('/(:tileSize(256|512)/)?index.json', (req, res, next) => {
-    const tileSize = parseInt(req.params.tileSize, 10) || undefined;
+
+  /**
+   * Handles requests for a combined rendered and data tilejson endpoint.
+   * @param {object} req - Express request object.
+   * @param {object} res - Express response object.
+   * @param {string} req.params.tileSize - Optional tile size parameter.
+   * @returns {void}
+   */
+  app.get('{/:tileSize}/index.json', (req, res, next) => {
+    const tileSize = allowedTileSizes(req.params['tileSize']);
     res.send(
       addTileJSONs(
-        addTileJSONs([], req, 'rendered', tileSize),
+        addTileJSONs([], req, 'rendered', parseInt(tileSize, 10)),
         req,
         'data',
         undefined,
@@ -403,7 +443,15 @@ function start(opts) {
   app.use('/', express.static(path.join(__dirname, '../public/resources')));
 
   const templates = path.join(__dirname, '../public/templates');
-  const serveTemplate = (urlPath, template, dataGetter) => {
+
+  /**
+   * Serves a Handlebars template.
+   * @param {string} urlPath - The URL path to serve the template at
+   * @param {string} template - The name of the template file
+   * @param {Function} dataGetter - A function to get data to be passed to the template.
+   *  @returns {void}
+   */
+  function serveTemplate(urlPath, template, dataGetter) {
     let templateFile = `${templates}/${template}.tmpl`;
     if (template === 'index') {
       if (options.frontPage === false) {
@@ -415,24 +463,17 @@ function start(opts) {
         templateFile = path.resolve(paths.root, options.frontPage);
       }
     }
-    startupPromises.push(
-      new Promise((resolve, reject) => {
-        fs.readFile(templateFile, (err, content) => {
-          if (err) {
-            err = new Error(`Template not found: ${err.message}`);
-            reject(err);
-            return;
-          }
-          const compiled = handlebars.compile(content.toString());
-
-          app.use(urlPath, (req, res, next) => {
-            let data = {};
-            if (dataGetter) {
-              data = dataGetter(req);
-              if (!data) {
-                return res.status(404).send('Not found');
-              }
-            }
+    try {
+      const content = fs.readFileSync(templateFile, 'utf-8');
+      const compiled = handlebars.compile(content.toString());
+      app.get(urlPath, (req, res, next) => {
+        if (opts.verbose) {
+          console.log(`Serving template at path: ${urlPath}`);
+        }
+        let data = {};
+        if (dataGetter) {
+          data = dataGetter(req);
+          if (data) {
             data['server_version'] =
               `${packageJson.name} v${packageJson.version}`;
             data['public_url'] = opts.publicUrl || '/';
@@ -445,14 +486,27 @@ function start(opts) {
               : '';
             if (template === 'wmts') res.set('Content-Type', 'text/xml');
             return res.status(200).send(compiled(data));
-          });
-          resolve();
-        });
-      }),
-    );
-  };
+          } else {
+            if (opts.verbose) {
+              console.log(`Forwarding request for: ${urlPath} to next route`);
+            }
+            next('route');
+          }
+        }
+      });
+    } catch (err) {
+      console.error(`Error reading template file: ${templateFile}`, err);
+      throw new Error(`Template not found: ${err.message}`); //throw an error so that the server doesnt start
+    }
+  }
 
-  serveTemplate('/$', 'index', (req) => {
+  /**
+   * Handles requests for the index page, providing a list of available styles and data.
+   * @param {object} req - Express request object.
+   * @param {object} res - Express response object.
+   * @returns {void}
+   */
+  serveTemplate('/', 'index', (req) => {
     let styles = {};
     for (const id of Object.keys(serving.styles || {})) {
       let style = {
@@ -464,11 +518,15 @@ function start(opts) {
       if (style.serving_rendered) {
         const { center } = style.serving_rendered.tileJSON;
         if (center) {
-          style.viewer_hash = `#${center[2]}/${center[1].toFixed(5)}/${center[0].toFixed(5)}`;
+          style.viewer_hash = `#${center[2]}/${center[1].toFixed(
+            5,
+          )}/${center[0].toFixed(5)}`;
 
           const centerPx = mercator.px([center[0], center[1]], center[2]);
           // Set thumbnail default size to be 256px x 256px
-          style.thumbnail = `${center[2]}/${Math.floor(centerPx[0] / 256)}/${Math.floor(centerPx[1] / 256)}.png`;
+          style.thumbnail = `${Math.floor(center[2])}/${Math.floor(
+            centerPx[0] / 256,
+          )}/${Math.floor(centerPx[1] / 256)}.png`;
         }
 
         const tileSize = 512;
@@ -484,7 +542,6 @@ function start(opts) {
 
       styles[id] = style;
     }
-
     let datas = {};
     for (const id of Object.keys(serving.data || {})) {
       let data = Object.assign({}, serving.data[id]);
@@ -496,14 +553,6 @@ function start(opts) {
         data.viewer_hash = `#${center[2]}/${center[1].toFixed(
           5,
         )}/${center[0].toFixed(5)}`;
-      }
-
-      data.is_vector = tileJSON.format === 'pbf';
-      if (!data.is_vector) {
-        if (center) {
-          const centerPx = mercator.px([center[0], center[1]], center[2]);
-          data.thumbnail = `${center[2]}/${Math.floor(centerPx[0] / 256)}/${Math.floor(centerPx[1] / 256)}.${tileJSON.format}`;
-        }
       }
 
       const tileSize = undefined;
@@ -519,6 +568,29 @@ function start(opts) {
         },
       )[0];
 
+      data.is_vector = tileJSON.format === 'pbf';
+      if (!data.is_vector) {
+        if (
+          tileJSON.encoding === 'terrarium' ||
+          tileJSON.encoding === 'mapbox'
+        ) {
+          if (!isLight) {
+            data.elevation_link = getTileUrls(
+              req,
+              tileJSON.tiles,
+              `data/${id}/elevation`,
+            )[0];
+          }
+          data.is_terrain = true;
+        }
+        if (center) {
+          const centerPx = mercator.px([center[0], center[1]], center[2]);
+          data.thumbnail = `${Math.floor(center[2])}/${Math.floor(
+            centerPx[0] / 256,
+          )}/${Math.floor(centerPx[1] / 256)}.${tileJSON.format}`;
+        }
+      }
+
       if (data.filesize) {
         let suffix = 'kB';
         let size = parseInt(tileJSON.filesize, 10) / 1024;
@@ -532,24 +604,28 @@ function start(opts) {
         }
         data.formatted_filesize = `${size.toFixed(2)} ${suffix}`;
       }
-
       datas[id] = data;
     }
-
     return {
       styles: Object.keys(styles).length ? styles : null,
       data: Object.keys(datas).length ? datas : null,
     };
   });
 
-  serveTemplate('/styles/:id/$', 'viewer', (req) => {
+  /**
+   * Handles requests for a map viewer template for a specific style.
+   * @param {object} req - Express request object.
+   * @param {object} res - Express response object.
+   * @param {string} req.params.id - ID of the style.
+   * @returns {void}
+   */
+  serveTemplate('/styles/:id/', 'viewer', (req) => {
     const { id } = req.params;
     const style = clone(((serving.styles || {})[id] || {}).styleJSON);
 
     if (!style) {
       return null;
     }
-
     return {
       ...style,
       id,
@@ -559,11 +635,13 @@ function start(opts) {
     };
   });
 
-  /*
-  app.use('/rendered/:id/$', function(req, res, next) {
-    return res.redirect(301, '/styles/' + req.params.id + '/');
-  });
-  */
+  /**
+   * Handles requests for a Web Map Tile Service (WMTS) XML template.
+   * @param {object} req - Express request object.
+   * @param {object} res - Express response object.
+   * @param {string} req.params.id - ID of the style.
+   * @returns {void}
+   */
   serveTemplate('/styles/:id/wmts.xml', 'wmts', (req) => {
     const { id } = req.params;
     const wmts = clone((serving.styles || {})[id]);
@@ -595,18 +673,34 @@ function start(opts) {
     };
   });
 
-  serveTemplate('/data/:id/$', 'data', (req) => {
-    const { id } = req.params;
+  /**
+   * Handles requests for a data view template for a specific data source.
+   * @param {object} req - Express request object.
+   * @param {object} res - Express response object.
+   * @param {string} req.params.id - ID of the data source.
+   * @param {string} [req.params.view] - Optional view type.
+   * @returns {void}
+   */
+  serveTemplate('/data{/:view}/:id/', 'data', (req) => {
+    const { id, view } = req.params;
     const data = serving.data[id];
 
     if (!data) {
       return null;
     }
+    const is_terrain =
+      (data.tileJSON.encoding === 'terrarium' ||
+        data.tileJSON.encoding === 'mapbox') &&
+      view === 'preview';
 
     return {
       ...data,
       id,
-      is_vector: data.tileJSON.format === 'pbf',
+      use_maplibre: data.tileJSON.format === 'pbf' || is_terrain,
+      is_terrain: is_terrain,
+      is_terrainrgb: data.tileJSON.encoding === 'mapbox',
+      terrain_encoding: data.tileJSON.encoding,
+      is_light: isLight,
     };
   });
 
@@ -616,7 +710,13 @@ function start(opts) {
     startupComplete = true;
   });
 
-  app.get('/health', (req, res, next) => {
+  /**
+   * Handles requests to see the health of the server.
+   * @param {object} req - Express request object.
+   * @param {object} res - Express response object.
+   * @returns {void}
+   */
+  app.get('/health', (req, res) => {
     if (startupComplete) {
       return res.status(200).send('OK');
     } else {
@@ -645,10 +745,10 @@ function start(opts) {
     startupPromise,
   };
 }
-
 /**
  * Stop the server gracefully
  * @param {string} signal Name of the received signal
+ * @returns {void}
  */
 function stopGracefully(signal) {
   console.log(`Caught signal ${signal}, stopping gracefully`);
@@ -656,11 +756,12 @@ function stopGracefully(signal) {
 }
 
 /**
- *
- * @param opts
+ * Starts and manages the server
+ * @param {object} opts - Configuration options for the server.
+ * @returns {Promise<object>} - A promise that resolves to the running server
  */
-export function server(opts) {
-  const running = start(opts);
+export async function server(opts) {
+  const running = await start(opts);
 
   running.startupPromise.catch((err) => {
     console.error(err.message);
@@ -674,12 +775,11 @@ export function server(opts) {
     console.log(`Caught signal ${signal}, refreshing`);
     console.log('Stopping server and reloading config');
 
-    running.server.shutdown(() => {
-      const restarted = start(opts);
+    running.server.shutdown(async () => {
+      const restarted = await start(opts);
       running.server = restarted.server;
       running.app = restarted.app;
     });
   });
-
   return running;
 }
