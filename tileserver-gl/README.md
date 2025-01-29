@@ -9,7 +9,7 @@ Download vector tiles from [OpenMapTiles](https://data.maptiler.com/downloads/pl
 
 The recommended method is to use docker:
 
-    docker build . -t stsdockerhub/tileserver-gl
+    docker build . -t stsdockerhub/tileserver-gl:5.1.3
 
 For further details see [INSTALL.md](docs/1.INSTALL.md).
 
