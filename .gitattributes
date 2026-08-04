@@ -1,0 +1,9 @@
+# Shell scripts run inside Linux containers. A CRLF checkout on Windows makes
+# the kernel look for an interpreter named "/bin/bash\r", which fails at
+# runtime as "exec .../docker-entrypoint.sh: no such file or directory".
+*.sh text eol=lf
+
+# Same reasoning for files consumed by the images / the container build.
+Dockerfile* text eol=lf
+*.yml text eol=lf
+*.json text eol=lf

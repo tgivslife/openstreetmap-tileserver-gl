@@ -10,24 +10,28 @@
     "serveAllFonts": true
   },
   "styles": {
-    "osm-liberty": {
-      "style": "osm-liberty/style.json",
+    "osm-openmaptiles": {
+      "style": "osm-openmaptiles/style.json",
       "mapping": { "planet-planetiler": "romania-tilemaker" }
     },
-    "openstreetmap": {
-      "style": "openstreetmap/style.json",
-      "mapping": { "planet-planetiler": "romania-tilemaker" }
-    },
-    "streets": {
-      "style": "streets/style.json",
+    "osm-openmaptiles-dark": {
+      "style": "osm-openmaptiles-dark/style.json",
       "mapping": { "planet-planetiler": "romania-tilemaker" }
     },
     "streets-v2": {
       "style": "streets-v2/style.json",
       "mapping": { "planet-planetiler": "romania-tilemaker" }
     },
-    "streets-v3": {
-      "style": "streets-v3/style.json",
+    "streets-v2-dark": {
+      "style": "streets-v2-dark/style.json",
+      "mapping": { "planet-planetiler": "romania-tilemaker" }
+    },
+    "basic-v2": {
+      "style": "basic-v2/style.json",
+      "mapping": { "planet-planetiler": "romania-tilemaker" }
+    },
+    "basic-v2-dark": {
+      "style": "basic-v2-dark/style.json",
       "mapping": { "planet-planetiler": "romania-tilemaker" }
     }
   },

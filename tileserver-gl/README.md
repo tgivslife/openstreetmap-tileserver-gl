@@ -1,21 +1,44 @@
 # TileServer GL
 
 Vector and raster maps with GL styles.
-Server-side rendering by MapLibre GL Native. Map tile server for MapLibre GL JS, Android, iOS, Leaflet, OpenLayers, GIS via WMTS, etc.
+Server-side rendering by MapLibre GL Native. Map tile server for MapLibre GL JS, Android, iOS, Leaflet,
+OpenLayers, GIS via WMTS, etc.
 
-Download vector tiles from [OpenMapTiles](https://data.maptiler.com/downloads/planet/).
+This is the vendored copy of [maptiler/tileserver-gl](https://github.com/maptiler/tileserver-gl) used by this
+project, currently based on **v5.7.0-pre.0** (see `package.json`).
+
+Download vector tiles from [OpenMapTiles](https://data.maptiler.com/downloads/planet/), or generate your own
+with [Planetiler](https://github.com/onthegomap/planetiler).
+
+## What it serves
+
+* **Vector tiles** from MBTiles and PMTiles (local, http(s) or S3-hosted PMTiles)
+* **Styles** — MapLibre style JSON with sources, sprites and glyphs rewritten to this server
+* **Rendered raster tiles** (`png` / `jpg` / `webp`, 256 or 512 px, up to `@3x`) via MapLibre GL Native
+* **Static map images** — by center+zoom, bounding box, or auto-fitted to the overlays, with paths and markers
+* **Fonts** (glyph ranges, including merged font stacks) and **sprites** (`@2x`, `@3x`)
+* **Terrain** — preview and elevation lookup for `mapbox`/`terrarium` encoded sources
+* **WMTS** capabilities, a MapLibre viewer and a Leaflet viewer
+* **Operational endpoints** — `/health` and an opt-in Prometheus metrics server
+
+Two builds exist. The full image renders raster output; the **light** build (`Dockerfile_light`,
+package name `tileserver-gl-light`) drops MapLibre GL Native, sharp and canvas and therefore serves vector
+tiles, styles, fonts and sprites only — no rendered tiles, no static maps, no elevation.
 
 ## Installation
 
 The recommended method is to use docker:
 
-    docker build . -t stsdockerhub/tileserver-gl:5.1.3
+    docker build . -t stsdockerhub/tileserver-gl:5.7.0-pre.0
+    docker build -f Dockerfile_light . -t stsdockerhub/tileserver-gl-light:5.7.0-pre.0
 
 For further details see [INSTALL.md](docs/1.INSTALL.md).
 
 ## Usage
 
-For further details see [USAGE.md](docs/2.USAGE.md).
+    docker run --rm -it -v $(pwd):/data -p 8080:8080 stsdockerhub/tileserver-gl:5.7.0-pre.0 --config /data/config.json
+
+For CLI options, environment variables and the full endpoint reference see [USAGE.md](docs/2.USAGE.md).
 
 ## Configuration file
 
@@ -23,4 +46,19 @@ For further details see [CONFIGURATION.md](docs/3.CONFIG.md).
 
 ## Deployment
 
-For further details see [DEPLOYMENT.md](docs/4.DEPLOYMENT.md).
+Reverse proxy, caching, forwarded headers, monitoring and tuning: [DEPLOYMENT.md](docs/4.DEPLOYMENT.md).
+
+## Layout
+
+| Path                  | Contents                                                             |
+|-----------------------|----------------------------------------------------------------------|
+| `src/main.js`         | CLI entry point, config discovery and auto-configuration              |
+| `src/server.js`       | Express app, route wiring, front page, `/health`, SIGHUP reload       |
+| `src/serve_data.js`   | `/data/*` — raw tiles, TileJSON, elevation API                        |
+| `src/serve_style.js`  | `/styles/*/style.json` and sprites                                    |
+| `src/serve_rendered.js` | Rendered tiles and static maps (replaced by `serve_light.js` in the light build) |
+| `src/serve_font.js`   | `/fonts/*`                                                            |
+| `src/metrics.js`      | Prometheus registry and metric definitions                            |
+| `src/pmtiles_adapter.js`, `src/mbtiles_wrapper.js` | Tile source backends, incl. S3 for PMTiles       |
+| `public/`             | Viewer templates and browser bundles (populated by `npm run prepare`) |
+| `test/`               | Mocha suite, including static-image regression fixtures               |

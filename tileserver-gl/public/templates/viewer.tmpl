@@ -26,6 +26,14 @@
     .leaflet-default-icon-path { /* used only in path-guessing heuristic, see L.Icon.Default */
       background-image: url({{public_url}}images/marker-icon.png{{&key_query}});
     }
+    .theme-switch button {
+      font: 16px/1 system-ui, sans-serif;
+      width: 29px;
+      height: 29px;
+      cursor: pointer;
+      background: none;
+      border: 0;
+    }
   </style>
 </head>
 <body>
@@ -55,7 +63,91 @@
           (isWebglSupported() ? 'vector' : 'raster'));
 
     var keyMatch = location.search.match(/[\?\&]key=([^&]+)/i);
-    var keyParam = keyMatch ? '?key=' + keyMatch[1] : '';    
+    var keyParam = keyMatch ? '?key=' + keyMatch[1] : '';
+
+    // --- light/dark theme switch ------------------------------------------
+    // A style participates when both "<id>" and "<id>-dark" are served, so
+    // pairing is by naming convention and needs no server-side config.
+    //
+    // The choice is deliberately NOT persisted anywhere. The current theme is
+    // the style in the URL, which the toggle keeps in sync, so each tab holds
+    // its own theme, a reload keeps it, and the link stays shareable.
+    var lightId = '{{id}}'.replace(/-dark$/, '');
+    var darkId = lightId + '-dark';
+    var isDark = '{{id}}' === darkId;
+
+    function styleUrlFor(id) {
+      return '{{public_url}}styles/' + id + '/style.json' + keyParam;
+    }
+
+    function makeThemeButton(onClick) {
+      var container = document.createElement('div');
+      container.className = 'maplibregl-ctrl maplibregl-ctrl-group theme-switch';
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      });
+      container.appendChild(button);
+      container.refresh = function () {
+        // Show the theme you would get by clicking, not the current one.
+        button.textContent = isDark ? '☀' : '☾';
+        var label = isDark ? 'Switch to light theme' : 'Switch to dark theme';
+        button.title = label;
+        button.setAttribute('aria-label', label);
+      };
+      container.refresh();
+      return container;
+    }
+
+    // Keep the address bar on the style that is actually displayed, so the
+    // URL stays copy-pasteable after a switch.
+    function syncLocation(id) {
+      if (!window.history || !history.replaceState) return;
+      history.replaceState(null, '', '{{public_url}}styles/' + id + '/' + location.search + location.hash);
+    }
+
+    // Adds the control only when the counterpart style exists.
+    function setupThemeSwitch(map, mode) {
+      var url = '{{public_url}}styles.json' + keyParam;
+      fetch(url).then(function (r) { return r.json(); }).then(function (styles) {
+        var ids = styles.map(function (s) { return s.id; });
+        if (ids.indexOf(lightId) === -1 || ids.indexOf(darkId) === -1) return;
+
+        var control;
+        var apply = function (dark) {
+          isDark = dark;
+          var id = dark ? darkId : lightId;
+          if (mode === 'vector') {
+            // setStyle keeps the camera, so position and zoom survive.
+            map.setStyle(styleUrlFor(id));
+            syncLocation(id);
+            control.refresh();
+          } else {
+            // Raster viewer: the tiles are pre-rendered per style, so reload
+            // onto the counterpart's viewer instead of swapping a layer.
+            location.href = '{{public_url}}styles/' + id + '/' + location.search + location.hash;
+          }
+        };
+
+        control = makeThemeButton(function () { apply(!isDark); });
+
+        if (mode === 'vector') {
+          map.addControl({
+            onAdd: function () { return control; },
+            onRemove: function () { control.remove(); }
+          }, 'top-right');
+        } else {
+          var Ctl = L.Control.extend({
+            options: { position: 'topright' },
+            onAdd: function () { return control; }
+          });
+          map.addControl(new Ctl());
+        }
+      }).catch(function () { /* no styles.json - leave the viewer as it is */ });
+    }
 
     if (preference == 'vector') {
       maplibregl.setRTLTextPlugin('{{public_url}}mapbox-gl-rtl-text.js' + keyParam, true);
@@ -73,7 +165,10 @@
       }));
 
       //check if terrain is available, before enabling the control
+      var terrainControlAdded = false;
       map.on('style.load', function () {
+        // style.load fires again after a theme switch; only add the control once.
+        if (terrainControlAdded) return;
         var terrainId = null;
         Object.entries(map.getStyle().sources).some(function (source) {
           if (source[1].type == "raster-dem") {
@@ -88,6 +183,7 @@
               source: terrainId,
             })
           );
+          terrainControlAdded = true;
         }
       });
 
@@ -96,6 +192,8 @@
          showInspectMapPopupOnHover: false,
          selectThreshold: 5
       }));
+
+      setupThemeSwitch(map, 'vector');
     } else {
         var map = L.map('map', { minZoom: 1, zoomControl: false });
         new L.Control.Zoom({ position: 'topright' }).addTo(map);
@@ -148,6 +246,8 @@
         setTimeout(function() {
             new L.Hash(map);
         }, 0);
+
+        setupThemeSwitch(map, 'raster');
     }
   </script>
 </body>
