@@ -8,7 +8,7 @@
   "sources": {
     "openmaptiles": {
       "type":"vector",
-      "url":"mbtiles://{europe}"
+      "url":"mbtiles://{planet-planetiler}"
     }
   },
   "glyphs":"{fontstack}/{range}.pbf",

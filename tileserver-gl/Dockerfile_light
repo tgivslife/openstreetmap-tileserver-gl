@@ -1,9 +1,24 @@
-# Use Ubuntu 24.04 (Noble) as the base
+# Vector-tiles-only ("light") build of tileserver-gl.
+#
+# Serves vector tiles, styles, fonts, sprites and the viewer, but does no
+# server-side rasterization: no /styles/<id>/<z>/<x>/<y>.png, no /static/
+# endpoints, no elevation queries. Light mode is selected by the package
+# name ending in `-light` (see src/server.js), which swaps serve_rendered.js
+# for the no-op stubs in src/serve_light.js.
+#
+# Dropping the renderer removes maplibre-gl-native, canvas and sharp, and
+# with them the whole GL stack (mesa + LLVM software rasterizer, GLFW, Xvfb)
+# and the cairo/pango/rsvg image stack.
+#
+#   docker build -f Dockerfile.light . -t tileserver-gl-light
+
 FROM ubuntu:noble AS builder
 
 ENV NODE_ENV="production"
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# Only sqlite3 still compiles here, and only if no prebuilt binary matches
+# the target platform. The toolchain never reaches the final stage.
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
     apt-get install -y --no-install-recommends --no-install-suggests \
@@ -12,18 +27,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
       ca-certificates \
       curl \
       gnupg \
-      pkg-config \
-      xvfb \
-      libglfw3-dev \
-      libuv1-dev \
-      libcairo2-dev \
-      libpango1.0-dev \
-      libpng-dev \
-      libjpeg-dev \
-      libgif-dev \
-      librsvg2-dev \
-      libcurl4-openssl-dev \
-      libicu-dev && \
+      pkg-config && \
     mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
@@ -39,20 +43,28 @@ WORKDIR /usr/src/app
 
 COPY package.json package-lock.json ./
 
+# Drop the renderer-only dependencies before installing. This is why the
+# install below is `npm install` and not `npm ci`: package.json no longer
+# matches the lockfile. Versions of everything that remains still come from
+# package-lock.json.
+RUN node -e ' \
+      const fs = require("fs"); \
+      const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); \
+      for (const dep of ["canvas", "@maplibre/maplibre-gl-native", "sharp"]) { \
+        delete pkg.dependencies[dep]; \
+      } \
+      fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n"); \
+    '
+
 RUN npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 100000 && \
     npm config set fetch-retry-maxtimeout 600000 && \
-    npm ci --omit=dev && \
-    # Build canvas from source for the Noble architecture.
-    # node-gyp reads npm_config_* from the env; npm 11 rejects
-    # `--build-from-source` as an unknown CLI flag.
-    npm_config_build_from_source=true npm rebuild canvas && \
+    npm install --omit=dev --no-audit --no-fund && \
     chown -R root:root /usr/src/app
 
-# Drop packages that are only needed while installing/building. The browser
-# bundles were already copied into public/resources by the `prepare` lifecycle
-# script above, and the gyp toolchain is never used again once the native
-# addons are compiled.
+# The browser bundles were already copied into public/resources by the
+# `prepare` lifecycle script above, and the gyp toolchain is never used
+# again once sqlite3 is built.
 RUN rm -rf \
       node_modules/maplibre-gl \
       node_modules/leaflet \
@@ -69,6 +81,9 @@ FROM ubuntu:noble AS final
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# node bundles its own ICU and libuv, so the runtime needs nothing beyond a
+# CA bundle and jemalloc. Every other library the full image installs is
+# there for the renderer.
 RUN export DEBIAN_FRONTEND=noninteractive && \
     groupadd -r node && \
     useradd -r -g node node && \
@@ -77,18 +92,6 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
       ca-certificates \
       curl \
       gnupg \
-      xvfb \
-      libglfw3 \
-      libuv1 \
-      libicu74 \
-      libcairo2 \
-      libjpeg-turbo8 \
-      libgif7 \
-      libpng16-16t64 \
-      libopengl0 \
-      libcurl4 \
-      librsvg2-2 \
-      libpango-1.0-0 \
       libjemalloc2 && \
     mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
@@ -121,6 +124,24 @@ ENV \
 
 COPY --from=builder /usr/src/app /usr/src/app
 COPY . /usr/src/app
+
+# `COPY . ` restored the original package.json, so re-apply the light
+# manifest here: the `-light` name suffix is what makes src/server.js and
+# src/serve_data.js load serve_light.js instead of serve_rendered.js.
+RUN node -e ' \
+      const fs = require("fs"); \
+      const pkg = JSON.parse(fs.readFileSync("/usr/src/app/package.json", "utf8")); \
+      pkg.name = "tileserver-gl-light"; \
+      for (const dep of ["canvas", "@maplibre/maplibre-gl-native", "sharp"]) { \
+        delete pkg.dependencies[dep]; \
+        delete pkg.allowScripts[dep + "@" + "*"]; \
+      } \
+      for (const key of Object.keys(pkg.allowScripts)) { \
+        if (/^(canvas|@maplibre\/maplibre-gl-native)@/.test(key)) delete pkg.allowScripts[key]; \
+      } \
+      fs.writeFileSync("/usr/src/app/package.json", JSON.stringify(pkg, null, 2) + "\n"); \
+    ' && \
+    rm -rf /usr/src/app/src/serve_rendered.js /usr/src/app/src/render.js
 
 RUN mkdir -p /data && chown node:node /data
 VOLUME /data

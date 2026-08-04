@@ -11,33 +11,29 @@
   },
   "styles": {
     "osm-liberty": {
-      "style": "osm-liberty/style.json"
+      "style": "osm-liberty/style.json",
+      "mapping": { "planet-planetiler": "romania-tilemaker" }
     },
     "openstreetmap": {
-      "style": "openstreetmap/style.json"
+      "style": "openstreetmap/style.json",
+      "mapping": { "planet-planetiler": "romania-tilemaker" }
     },
     "streets": {
-      "style": "streets/style.json"
+      "style": "streets/style.json",
+      "mapping": { "planet-planetiler": "romania-tilemaker" }
     },
     "streets-v2": {
-      "style": "streets-v2/style.json"
+      "style": "streets-v2/style.json",
+      "mapping": { "planet-planetiler": "romania-tilemaker" }
     },
     "streets-v3": {
-      "style": "streets-v3/style.json"
+      "style": "streets-v3/style.json",
+      "mapping": { "planet-planetiler": "romania-tilemaker" }
     }
   },
   "data": {
     "romania-tilemaker": {
       "mbtiles": "romania-latest.tilemaker.mbtiles"
-    },
-    "romania-planetiler": {
-      "mbtiles": "europe-latest.output.mbtiles"
-    },
-    "planet-planetiler": {
-      "mbtiles": "planet-240401.mbtiles"
-    },
-    "europe": {
-      "mbtiles": "europe-latest.output.mbtiles"
     }
   }
 }

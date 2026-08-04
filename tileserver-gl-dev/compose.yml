@@ -1,11 +1,9 @@
-version: '3.7'
-
 services:
   tileserver-gl:
     container_name: tileserver-gl
-    image: stsdockerhub/tileserver-gl:4.10.3-56cca70
+    image: stsdockerhub/tileserver-gl-light:5.7.0-pre.0
     volumes:
       - "./data:/data"
     command: [ "--verbose", "--config", "/data/config.json" ]
     ports:
-      - "8080:8080"
+      - "8081:8080"

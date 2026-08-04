@@ -36,6 +36,11 @@
     "lint:prettier:fix": "prettier --write \"{,!(node_modules|dist|static|public)/**/}*.{js,ts,cjs,mjs,json}\" --ignore-path .gitignore",
     "docker": "docker build . && docker run --rm -i -p 8080:8080 $(docker build -q .)"
   },
+  "allowScripts": {
+    "@maplibre/maplibre-gl-native@6.4.1": true,
+    "canvas@3.2.3": true,
+    "sqlite3@5.1.7": true
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1081.0",
     "@jsse/pbfont": "^0.3.4",
