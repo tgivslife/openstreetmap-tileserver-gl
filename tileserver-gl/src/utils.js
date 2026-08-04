@@ -9,18 +9,23 @@ import { existsP } from './promises.js';
 import { getPMtilesTile } from './pmtiles_adapter.js';
 
 export const allowedSpriteFormats = allowedOptions(['png', 'json']);
-
 export const allowedTileSizes = allowedOptions(['256', '512']);
+export const httpTester = /^https?:\/\//i;
+export const s3Tester = /^s3:\/\//i; // Plain AWS S3 format
+export const s3HttpTester = /^s3\+https?:\/\//i; // S3-compatible with custom endpoint
+export const pmtilesTester = /^pmtiles:\/\//i;
+export const mbtilesTester = /^mbtiles:\/\//i;
 
 /**
  * Restrict user input to an allowed set of options.
  * @param {string[]} opts - An array of allowed option strings.
  * @param {object} [config] - Optional configuration object.
  * @param {string} [config.defaultValue] - The default value to return if input doesn't match.
- * @returns {function(string): string} - A function that takes a value and returns it if valid or a default.
+ * @returns {(value: string) => string} - A function that takes a value and returns it if valid or a default.
  */
 export function allowedOptions(opts, { defaultValue } = {}) {
   const values = Object.fromEntries(opts.map((key) => [key, key]));
+  // eslint-disable-next-line security/detect-object-injection -- value is checked against allowed opts keys
   return (value) => values[value] || defaultValue;
 }
 
@@ -35,7 +40,6 @@ export function allowedScales(scale, maxScale = 9) {
     return 1;
   }
 
-  // eslint-disable-next-line security/detect-non-literal-regexp
   const regex = new RegExp(`^[2-${maxScale}]x$`);
   if (!regex.test(scale)) {
     return null;
@@ -70,9 +74,10 @@ export function allowedSpriteScales(scale, maxScale = 3) {
  * @param {object} req - Express request object.
  * @param {string} url - The URL string to fix.
  * @param {string} publicUrl - The public URL prefix to use for replacements.
+ * @param {string|string[]} allowedHosts - Allowed hosts for Host header poisoning mitigation.
  * @returns {string} - The fixed URL string.
  */
-export function fixUrl(req, url, publicUrl) {
+export function fixUrl(req, url, publicUrl, allowedHosts) {
   if (!url || typeof url !== 'string' || url.indexOf('local://') !== 0) {
     return url;
   }
@@ -84,7 +89,117 @@ export function fixUrl(req, url, publicUrl) {
   if (queryParams.length) {
     query = `?${queryParams.join('&')}`;
   }
-  return url.replace('local://', getPublicUrl(publicUrl, req)) + query;
+  return (
+    url.replace('local://', getPublicUrl(publicUrl, req, allowedHosts)) + query
+  );
+}
+
+/**
+ * Removes optional :port from a host string for comparison. Handles IPv6 [addr]:port.
+ * @param {string} host - The input host.
+ * @returns {string} - Host string with port removed.
+ */
+function stripPort(host) {
+  if (!host || typeof host !== 'string') return host;
+  if (host.startsWith('[')) {
+    const i = host.indexOf(']:');
+    return i > 0 ? host.slice(0, i + 1) : host;
+  }
+  const i = host.lastIndexOf(':');
+  if (i > 0 && /^\d+$/.test(host.slice(i + 1))) return host.slice(0, i);
+  return host;
+}
+
+/**
+ * Parses allowed-hosts config: "*" or comma-separated list or array. Default "*" means allow any host (no HNP mitigation).
+ * Hosts are normalized to lowercase for case-insensitive matching (hostnames are case-insensitive per RFC).
+ * @param {string|string[]|undefined} allowedHosts - Env TILESERVER_GL_ALLOWED_HOSTS or opts.allowedHosts.
+ * @returns {string|string[]} - "*" or array of allowed host strings (port stripped, lowercased).
+ */
+export function parseAllowedHosts(allowedHosts) {
+  if (allowedHosts == null || allowedHosts === '') {
+    return '*';
+  }
+  const normalize = (h) => {
+    const v = stripPort(String(h).trim());
+    return v ? v.toLowerCase() : '';
+  };
+  if (Array.isArray(allowedHosts)) {
+    return allowedHosts.map(normalize).filter(Boolean);
+  }
+  const s = typeof allowedHosts === 'string' ? allowedHosts.trim() : '';
+  if (s === '*' || s === '') {
+    return '*';
+  }
+  return s.split(',').map(normalize).filter(Boolean);
+}
+
+/**
+ * Returns true if host is allowed (allowlist is "*" or host is in the list). Port stripped, comparison case-insensitive.
+ * @param {string} host - Host to check (e.g. from request or X-Forwarded-Host).
+ * @param {string|string[]} allowedHosts - Result of parseAllowedHosts().
+ * @returns {boolean} - True if the host is allowed, false otherwise.
+ */
+export function isHostAllowed(host, allowedHosts) {
+  if (!host || typeof host !== 'string') {
+    return false;
+  }
+  const h = stripPort(host.split(',')[0].trim()).toLowerCase();
+  if (allowedHosts === '*') {
+    return true;
+  }
+  if (Array.isArray(allowedHosts)) {
+    return allowedHosts.includes(h);
+  }
+  return false;
+}
+
+/** Host header must not contain path or whitespace (sanity check for malformed headers). */
+const BAD_HOST_RE = /[\s/]/;
+
+/**
+ * Candidate host from request: X-Forwarded-Host or Host header.
+ * Returns undefined if the value looks malformed (contains / or whitespace), so it is treated as not allowed.
+ * @param {object} req - Express request.
+ * @returns {string|undefined} - The candidate host string, or undefined if the value is malformed.
+ */
+export function getCandidateHost(req) {
+  const check = (raw) => {
+    if (!raw || typeof raw !== 'string') return undefined;
+    const s = raw.split(',')[0].trim();
+    if (BAD_HOST_RE.test(s)) return undefined;
+    return s;
+  };
+  const forwarded = req.get && req.get('X-Forwarded-Host');
+  if (forwarded) {
+    const v = check(forwarded);
+    if (v !== undefined) return v;
+  }
+  const host = req.get && req.get('host');
+  if (host) {
+    const v = check(host);
+    if (v !== undefined) return v;
+  }
+  if (req.hostname) {
+    const v = check(req.hostname);
+    if (v !== undefined) return v;
+  }
+  return undefined;
+}
+
+/**
+ * Protocol for URL building: only http or https (mitigates scheme injection).
+ * @param {object} req - Express request.
+ * @returns {string} - 'http' or 'https'.
+ */
+export function getSafeProtocol(req) {
+  const get = req.get && req.get.bind(req);
+  const proto =
+    (get && (get('X-Forwarded-Protocol') || get('X-Forwarded-Proto'))) ||
+    req.protocol ||
+    'http';
+  const p = (typeof proto === 'string' ? proto : '').toLowerCase();
+  return p === 'https' ? 'https' : 'http';
 }
 
 /**
@@ -113,19 +228,37 @@ function getUrlObject(req) {
 
 /**
  * Gets the public URL, either from a provided publicUrl or generated from the request.
+ * When publicUrl is not set, uses allowedHosts (default "*") to mitigate Host header poisoning:
+ * if the request host is not in the allowlist, returns a path-only prefix (e.g. "/") so responses
+ * do not contain attacker-controlled hosts.
  * @param {string} publicUrl - The optional public URL to use.
  * @param {object} req - The Express request object.
- * @returns {string} - The final public URL string.
+ * @param {string|string[]} [allowedHosts] - "*" or list of allowed hosts (e.g. from TILESERVER_GL_ALLOWED_HOSTS).
+ * @returns {string} - The final public URL string (or path-only prefix if host not allowed).
  */
-export function getPublicUrl(publicUrl, req) {
+export function getPublicUrl(publicUrl, req, allowedHosts) {
   if (publicUrl) {
-    return publicUrl;
+    try {
+      return new URL(publicUrl).toString();
+    } catch {
+      return new URL(publicUrl, getUrlObject(req)).toString();
+    }
+  }
+  const parsed = parseAllowedHosts(allowedHosts);
+  const candidateHost = getCandidateHost(req);
+  if (!isHostAllowed(candidateHost, parsed)) {
+    const xForwardedPath = req.get && req.get('X-Forwarded-Path');
+    const prefix = xForwardedPath
+      ? `/${xForwardedPath.replace(/^\/+/, '')}`
+      : '';
+    return prefix ? (prefix.endsWith('/') ? prefix : `${prefix}/`) : '/';
   }
   return getUrlObject(req).toString();
 }
 
 /**
  * Generates an array of tile URLs based on given parameters.
+ * When publicUrl is not set, uses allowedHosts to mitigate HNP: if request host is not allowed, returns path-only URLs.
  * @param {object} req - Express request object.
  * @param {string | string[]} domains - Domain(s) to use for tile URLs.
  * @param {string} path - The base path for the tiles.
@@ -133,6 +266,7 @@ export function getPublicUrl(publicUrl, req) {
  * @param {string} format - The format of the tiles (e.g., 'png', 'jpg').
  * @param {string} publicUrl - The public URL to use (if not using domains).
  * @param {object} [aliases] - Aliases for format extensions.
+ * @param {string|string[]} [allowedHosts] - "*" or list of allowed hosts for HNP mitigation.
  * @returns {string[]} An array of tile URL strings.
  */
 export function getTileUrls(
@@ -143,8 +277,14 @@ export function getTileUrls(
   format,
   publicUrl,
   aliases,
+  allowedHosts,
 ) {
   const urlObject = getUrlObject(req);
+  const parsedAllowed = parseAllowedHosts(allowedHosts);
+  const candidateHost = getCandidateHost(req);
+  const hostAllowed = isHostAllowed(candidateHost, parsedAllowed);
+  const safeProtocol = getSafeProtocol(req);
+
   if (domains) {
     if (domains.constructor === String && domains.length > 0) {
       domains = domains.split(',');
@@ -152,13 +292,13 @@ export function getTileUrls(
     const hostParts = urlObject.host.split('.');
     const relativeSubdomainsUsable =
       hostParts.length > 1 &&
-      !/^([0-9]{1,3}\.){3}[0-9]{1,3}(\:[0-9]+)?$/.test(urlObject.host);
+      !/^([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?$/.test(urlObject.host);
     const newDomains = [];
     for (const domain of domains) {
       if (domain.indexOf('*') !== -1) {
         if (relativeSubdomainsUsable) {
           const newParts = hostParts.slice(1);
-          newParts.unshift(domain.replace('*', hostParts[0]));
+          newParts.unshift(domain.replace(/\*/g, hostParts[0]));
           newDomains.push(newParts.join('.'));
         }
       } else {
@@ -180,7 +320,9 @@ export function getTileUrls(
   }
   const query = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
 
+  // eslint-disable-next-line security/detect-object-injection -- format is validated format string from tileJSON
   if (aliases && aliases[format]) {
+    // eslint-disable-next-line security/detect-object-injection -- format is validated format string from tileJSON
     format = aliases[format];
   }
 
@@ -195,16 +337,23 @@ export function getTileUrls(
     format = '';
   }
 
+  const xForwardedPath = `${req.get('X-Forwarded-Path') ? '/' + req.get('X-Forwarded-Path').replace(/^\/+/, '') : ''}`;
+
   const uris = [];
   if (!publicUrl) {
-    let xForwardedPath = `${req.get('X-Forwarded-Path') ? '/' + req.get('X-Forwarded-Path') : ''}`;
-    for (const domain of domains) {
-      uris.push(
-        `${req.protocol}://${domain}${xForwardedPath}/${path}/${tileParams}${format}${query}`,
-      );
+    if (!hostAllowed) {
+      uris.push(`${xForwardedPath}/${path}/${tileParams}${format}${query}`);
+    } else {
+      for (const domain of domains) {
+        uris.push(
+          `${safeProtocol}://${domain}${xForwardedPath}/${path}/${tileParams}${format}${query}`,
+        );
+      }
     }
   } else {
-    uris.push(`${publicUrl}${path}/${tileParams}${format}${query}`);
+    uris.push(
+      `${getPublicUrl(publicUrl, req, allowedHosts)}${path}/${tileParams}${format}${query}`,
+    );
   }
 
   return uris;
@@ -238,7 +387,7 @@ export function fixTileJSONCenter(tileJSON) {
 export function readFile(filename) {
   return new Promise((resolve, reject) => {
     const sanitizedFilename = path.normalize(filename); // Normalize path, remove ..
-    // eslint-disable-next-line security/detect-non-literal-fs-filename
+
     fs.readFile(String(sanitizedFilename), (err, data) => {
       if (err) {
         reject(err);
@@ -259,8 +408,9 @@ export function readFile(filename) {
  * @returns {Promise<Buffer>} A promise that resolves with the font data Buffer or rejects with an error.
  */
 async function getFontPbf(allowedFonts, fontPath, name, range, fallbacks) {
+  // eslint-disable-next-line security/detect-object-injection -- name is validated font name from sanitizedName check
   if (!allowedFonts || (allowedFonts[name] && fallbacks)) {
-    const fontMatch = name?.match(/^[\p{L}\p{N} \-\.~!*'()@&=+,#$\[\]]+$/u);
+    const fontMatch = name?.match(/^[\p{L}\p{N} \-_.~!*'()@&=+,#$[\]]+$/u);
     const sanitizedName = fontMatch?.[0] || 'invalid';
     if (!name || typeof name !== 'string' || name.trim() === '' || !fontMatch) {
       console.error(
@@ -288,6 +438,7 @@ async function getFontPbf(allowedFonts, fontPath, name, range, fallbacks) {
     if (!fallbacks) {
       fallbacks = clone(allowedFonts || {});
     }
+    // eslint-disable-next-line security/detect-object-injection -- name is validated font name
     delete fallbacks[name];
 
     try {
@@ -307,8 +458,10 @@ async function getFontPbf(allowedFonts, fontPath, name, range, fallbacks) {
           fontStyle = 'Regular';
         }
         fallbackName = `Noto Sans ${fontStyle}`;
+        // eslint-disable-next-line security/detect-object-injection -- fallbackName is constructed from validated font style
         if (!fallbacks[fallbackName]) {
           fallbackName = `Open Sans ${fontStyle}`;
+          // eslint-disable-next-line security/detect-object-injection -- fallbackName is constructed from validated font style
           if (!fallbacks[fallbackName]) {
             fallbackName = Object.keys(fallbacks)[0];
           }
@@ -318,10 +471,11 @@ async function getFontPbf(allowedFonts, fontPath, name, range, fallbacks) {
           fallbackName,
           sanitizedName,
         );
+        // eslint-disable-next-line security/detect-object-injection -- fallbackName is constructed from validated font style
         delete fallbacks[fallbackName];
         return getFontPbf(null, fontPath, fallbackName, range, fallbacks);
       } else {
-        throw new Error('Font load error');
+        throw new Error('Font load error', { cause: err });
       }
     }
   } else {
@@ -385,20 +539,101 @@ export async function listFonts(fontPath) {
 }
 
 /**
- * Checks if a string is a valid HTTP or HTTPS URL.
- * @param {string} string - The string to validate.
- * @returns {boolean} True if the string is a valid HTTP/HTTPS URL, false otherwise.
+ * Checks if a string is a valid HTTP/HTTPS URL.
+ * @param {string} string - The string to check.
+ * @returns {boolean} - True if the string is a valid HTTP/HTTPS URL.
  */
 export function isValidHttpUrl(string) {
-  let url;
-
   try {
-    url = new URL(string);
-  } catch (_) {
+    return httpTester.test(string);
+  } catch {
     return false;
   }
+}
 
-  return url.protocol === 'http:' || url.protocol === 'https:';
+/**
+ * Checks if a string is a valid S3 URL.
+ * @param {string} string - The string to check.
+ * @returns {boolean} - True if the string is a valid S3 URL.
+ */
+export function isS3Url(string) {
+  try {
+    return s3Tester.test(string) || s3HttpTester.test(string);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks if a string is a valid remote URL (HTTP, HTTPS, or S3).
+ * @param {string} string - The string to check.
+ * @returns {boolean} - True if the string is a valid remote URL.
+ */
+export function isValidRemoteUrl(string) {
+  try {
+    return (
+      httpTester.test(string) ||
+      s3Tester.test(string) ||
+      s3HttpTester.test(string)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks if a string uses the pmtiles:// protocol.
+ * @param {string} string - The string to check.
+ * @returns {boolean} - True if the string uses pmtiles:// protocol.
+ */
+export function isPMTilesProtocol(string) {
+  try {
+    return pmtilesTester.test(string);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks if a string uses the mbtiles:// protocol.
+ * @param {string} string - The string to check.
+ * @returns {boolean} - True if the string uses mbtiles:// protocol.
+ */
+export function isMBTilesProtocol(string) {
+  try {
+    return mbtilesTester.test(string);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Converts a longitude/latitude point to tile and pixel coordinates at a given zoom level.
+ * @param {number} lon - Longitude in degrees.
+ * @param {number} lat - Latitude in degrees.
+ * @param {number} zoom - Zoom level.
+ * @param {number} tileSize - Size of the tile in pixels (e.g., 256 or 512).
+ * @returns {{tileX: number, tileY: number, pixelX: number, pixelY: number}} - Tile and pixel coordinates.
+ */
+export function lonLatToTilePixel(lon, lat, zoom, tileSize) {
+  let siny = Math.sin((lat * Math.PI) / 180);
+  // Truncating to 0.9999 effectively limits latitude to 89.189. This is
+  // about a third of a tile past the edge of the world tile.
+  siny = Math.min(Math.max(siny, -0.9999), 0.9999);
+
+  const xWorld = tileSize * (0.5 + lon / 360);
+  const yWorld =
+    tileSize * (0.5 - Math.log((1 + siny) / (1 - siny)) / (4 * Math.PI));
+
+  const scale = 1 << zoom;
+
+  const tileX = Math.floor((xWorld * scale) / tileSize);
+  const tileY = Math.floor((yWorld * scale) / tileSize);
+
+  const pixelX = Math.floor(xWorld * scale) - tileX * tileSize;
+  const pixelY = Math.floor(yWorld * scale) - tileY * tileSize;
+
+  return { tileX, tileY, pixelX, pixelY };
 }
 
 /**
@@ -412,15 +647,18 @@ export function isValidHttpUrl(string) {
  */
 export async function fetchTileData(source, sourceType, z, x, y) {
   if (sourceType === 'pmtiles') {
-    return await new Promise(async (resolve) => {
+    try {
       const tileinfo = await getPMtilesTile(source, z, x, y);
-      if (!tileinfo?.data) return resolve(null);
-      resolve({ data: tileinfo.data, headers: tileinfo.header });
-    });
+      if (!tileinfo?.data) return null;
+      return { data: tileinfo.data, headers: tileinfo.header };
+    } catch (error) {
+      console.error('Error fetching PMTiles tile:', error);
+      return null;
+    }
   } else if (sourceType === 'mbtiles') {
-    return await new Promise((resolve) => {
+    return new Promise((resolve) => {
       source.getTile(z, x, y, (err, tileData, tileHeader) => {
-        if (err) {
+        if (err || tileData == null) {
           return resolve(null);
         }
         resolve({ data: tileData, headers: tileHeader });
