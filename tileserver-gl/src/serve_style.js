@@ -7,12 +7,15 @@ import express from 'express';
 import { validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
 
 import {
-  allowedSpriteScales,
   allowedSpriteFormats,
+  allowedSpriteScales,
   fixUrl,
-  readFile,
+  getPublicUrl,
   isValidHttpUrl,
+  readFile,
+  setCacheControl,
 } from './utils.js';
+import { gzipP } from './promises.js';
 
 let metricsModule = null;
 
@@ -37,6 +40,69 @@ export const serve_style = {
         });
     }
     const app = express().disable('x-powered-by');
+
+    // Serving a style only rewrites a handful of URL fields; the bulk of the
+    // document (257 layers in the bundled styles) is byte-identical for every
+    // request. The finished payload is therefore memoised per distinct public
+    // URL + API key. The cache hangs off the repo entry, so a style reload —
+    // which replaces repo[id] wholesale — drops it with the old entry.
+    // Bounded because the key is caller-supplied: expiring tokens are all
+    // distinct, and an unbounded map would grow without limit.
+    const STYLE_CACHE_MAX = 32;
+
+    /**
+     * Builds the style document for a request, with the local:// URLs resolved.
+     * Only the fields that get rewritten are copied — `layers` is never
+     * mutated, so it is shared with the cached original rather than cloned.
+     * @param {object} item - Repository entry for the style.
+     * @param {express.Request} req - Express request object.
+     * @returns {object} - The style document to serve.
+     */
+    const buildStyle = (item, req) => {
+      const styleJSON_ = {
+        ...item.styleJSON,
+        sources: clone(item.styleJSON.sources),
+      };
+      for (const name of Object.keys(styleJSON_.sources)) {
+        // eslint-disable-next-line security/detect-object-injection -- name is from Object.keys of style sources
+        const source = styleJSON_.sources[name];
+        source.url = fixUrl(req, source.url, item.publicUrl, allowedHosts);
+        if (typeof source.data == 'string') {
+          source.data = fixUrl(req, source.data, item.publicUrl, allowedHosts);
+        }
+      }
+      if (styleJSON_.sprite) {
+        if (Array.isArray(styleJSON_.sprite)) {
+          // Entries get their .url reassigned, so these objects do need copying.
+          styleJSON_.sprite = clone(styleJSON_.sprite);
+          styleJSON_.sprite.forEach((spriteItem) => {
+            spriteItem.url = fixUrl(
+              req,
+              spriteItem.url,
+              item.publicUrl,
+              allowedHosts,
+            );
+          });
+        } else {
+          styleJSON_.sprite = fixUrl(
+            req,
+            styleJSON_.sprite,
+            item.publicUrl,
+            allowedHosts,
+          );
+        }
+      }
+      if (styleJSON_.glyphs) {
+        styleJSON_.glyphs = fixUrl(
+          req,
+          styleJSON_.glyphs,
+          item.publicUrl,
+          allowedHosts,
+        );
+      }
+      return styleJSON_;
+    };
+
     /**
      * Handles requests for style.json files.
      * @param {express.Request} req - Express request object.
@@ -45,7 +111,7 @@ export const serve_style = {
      * @param {string} req.params.id - ID of the style.
      * @returns {Promise<void>}
      */
-    app.get('/:id/style.json', (req, res, next) => {
+    app.get('/:id/style.json', async (req, res, next) => {
       const { id } = req.params;
       if (verbose >= 1) {
         console.log(
@@ -59,51 +125,47 @@ export const serve_style = {
         if (!item) {
           return res.sendStatus(404);
         }
-        const styleJSON_ = clone(item.styleJSON);
-        for (const name of Object.keys(styleJSON_.sources)) {
-          // eslint-disable-next-line security/detect-object-injection -- name is from Object.keys of style sources
-          const source = styleJSON_.sources[name];
-          source.url = fixUrl(req, source.url, item.publicUrl, allowedHosts);
-          if (typeof source.data == 'string') {
-            source.data = fixUrl(
-              req,
-              source.data,
-              item.publicUrl,
-              allowedHosts,
-            );
+
+        // Everything that varies the output: the public URL base (derived from
+        // publicUrl, or from the request host when it is not set) and the key
+        // that fixUrl appends to each rewritten URL.
+        const base = getPublicUrl(item.publicUrl, req, allowedHosts);
+        const key = typeof req.query.key === 'string' ? req.query.key : '';
+        const cacheKey = `${base}\u0000${key}`;
+
+        if (!item.styleCache) {
+          item.styleCache = new Map();
+        }
+        let entry = item.styleCache.get(cacheKey);
+        if (entry) {
+          // Refresh recency so the eviction below drops the coldest entry.
+          item.styleCache.delete(cacheKey);
+          item.styleCache.set(cacheKey, entry);
+        } else {
+          const json = Buffer.from(JSON.stringify(buildStyle(item, req)));
+          entry = { json, gzip: await gzipP(json) };
+          item.styleCache.set(cacheKey, entry);
+          if (item.styleCache.size > STYLE_CACHE_MAX) {
+            item.styleCache.delete(item.styleCache.keys().next().value);
           }
         }
-        if (styleJSON_.sprite) {
-          if (Array.isArray(styleJSON_.sprite)) {
-            styleJSON_.sprite.forEach((spriteItem) => {
-              spriteItem.url = fixUrl(
-                req,
-                spriteItem.url,
-                item.publicUrl,
-                allowedHosts,
-              );
-            });
-          } else {
-            styleJSON_.sprite = fixUrl(
-              req,
-              styleJSON_.sprite,
-              item.publicUrl,
-              allowedHosts,
-            );
-          }
-        }
-        if (styleJSON_.glyphs) {
-          styleJSON_.glyphs = fixUrl(
-            req,
-            styleJSON_.glyphs,
-            item.publicUrl,
-            allowedHosts,
-          );
-        }
+
         if (metricsModule) {
           metricsModule.tilesServedTotal.inc({ type: 'style', name: id });
         }
-        return res.send(styleJSON_);
+
+        res.set('Content-Type', 'application/json; charset=utf-8');
+        setCacheControl(res, options, 'metadata');
+        // RFC 7231 §5.3.4: a missing Accept-Encoding means any encoding is
+        // acceptable. Only an explicit header excluding gzip forces identity.
+        if (
+          req.headers['accept-encoding'] === undefined ||
+          req.acceptsEncodings('gzip') === 'gzip'
+        ) {
+          res.set('Content-Encoding', 'gzip');
+          return res.send(entry.gzip);
+        }
+        return res.send(entry.json);
       } catch (e) {
         next(e);
       }
@@ -200,6 +262,7 @@ export const serve_style = {
               sanitizedFormat,
             );
           res.set({ 'Last-Modified': item.lastModified });
+          setCacheControl(res, options, 'asset');
           return res.send(data);
         } catch (err) {
           if (verbose >= 1) {

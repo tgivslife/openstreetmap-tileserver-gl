@@ -2,7 +2,7 @@
 
 import express from 'express';
 
-import { getFontsPbf, listFonts } from './utils.js';
+import { getFontsPbf, listFonts, setCacheControl } from './utils.js';
 
 let metricsModule = null;
 
@@ -71,6 +71,7 @@ export async function serve_font(options, allowedFonts, programOpts) {
       );
       res.header('Content-type', 'application/x-protobuf');
       res.header('Last-Modified', lastModified);
+      setCacheControl(res, options, 'asset');
       if (metricsModule) {
         metricsModule.tilesServedTotal.inc({ type: 'font', name: sFontStack });
       }
@@ -100,6 +101,7 @@ export async function serve_font(options, allowedFonts, programOpts) {
       console.log('Handling list font request for /fonts.json');
     }
     res.header('Content-type', 'application/json');
+    setCacheControl(res, options, 'metadata');
     return res.send(
       Object.keys(options.serveAllFonts ? existingFonts : allowedFonts).sort(),
     );

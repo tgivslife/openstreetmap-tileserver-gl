@@ -10,20 +10,21 @@ import { VectorTile } from '@mapbox/vector-tile';
 import { SphericalMercator } from '@mapbox/sphericalmercator';
 
 import {
+  fetchTileData,
   fixTileJSONCenter,
   getTileUrls,
   isValidRemoteUrl,
-  fetchTileData,
   lonLatToTilePixel,
+  setCacheControl,
 } from './utils.js';
 import { getPMtilesInfo, openPMtiles } from './pmtiles_adapter.js';
 import { gunzipP, gzipP } from './promises.js';
 import { openMbTilesWrapper } from './mbtiles_wrapper.js';
 
 import fs from 'node:fs';
+import { fileURLToPath } from 'url';
 
 let metricsModule = null;
-import { fileURLToPath } from 'url';
 
 const packageJson = JSON.parse(
   fs.readFileSync(
@@ -130,10 +131,19 @@ export const serve_data = {
       }
 
       let data = fetchTile.data;
-      let headers = fetchTile.headers;
-      let isGzipped = data.slice(0, 2).indexOf(Buffer.from([0x1f, 0x8b])) === 0;
+      const headers = fetchTile.headers || {};
+      // Gzip magic bytes, compared directly to avoid allocating a needle
+      // Buffer on every request.
+      const isGzipped = data.length > 1 && data[0] === 0x1f && data[1] === 0x8b;
 
-      if (isGzipped) {
+      // Only the paths that read or rewrite the tile bytes need them decompressed.
+      // Vector tiles are stored gzipped and are served gzipped, so for the common case the stored blob is handed
+      // straight to the client instead of being gunzipped and re-gzipped on every request.
+      const needsRaw =
+        format === 'geojson' ||
+        (tileJSONFormat === 'pbf' && Boolean(options.dataDecoratorFunc));
+
+      if (isGzipped && needsRaw) {
         data = await gunzipP(data);
       }
 
@@ -171,13 +181,34 @@ export const serve_data = {
         }
         data = JSON.stringify(geojson);
       }
-      if (headers) {
-        delete headers['ETag'];
-      }
-      headers['Content-Encoding'] = 'gzip';
-      res.set(headers);
+      // The mbtiles ETag describes the file, not the tile, so it would be the same for every tile in the archive.
+      // Dropping it lets express derive a body-based one.
+      delete headers['ETag'];
 
-      data = await gzipP(data);
+      // RFC 7231 §5.3.4: a missing Accept-Encoding means any encoding is acceptable.
+      // Only an explicit header that excludes gzip forces identity.
+      const acceptsGzip =
+        req.headers['accept-encoding'] === undefined ||
+        req.acceptsEncodings('gzip') === 'gzip';
+      // png/jpg/webp are already compressed; gzipping them burns CPU to no effect.
+      const compressible = format === 'pbf' || format === 'geojson';
+
+      let gzipped = isGzipped && !needsRaw;
+      if (gzipped && !acceptsGzip) {
+        data = await gunzipP(data);
+        gzipped = false;
+      } else if (!gzipped && acceptsGzip && compressible) {
+        data = await gzipP(data);
+        gzipped = true;
+      }
+
+      if (gzipped) {
+        headers['Content-Encoding'] = 'gzip';
+      } else {
+        delete headers['Content-Encoding'];
+      }
+      res.set(headers);
+      setCacheControl(res, options, 'tile');
 
       if (metricsModule) {
         metricsModule.tilesServedTotal.inc({
@@ -421,6 +452,8 @@ export const serve_data = {
           sourceInfo.tileSize,
         );
 
+        // Derived from the same immutable tiles, so cacheable on the same terms.
+        setCacheControl(res, options, 'tile');
         res.status(200).json({
           long: lon,
           lat: lat,
@@ -510,6 +543,7 @@ export const serve_data = {
         },
         allowedHosts,
       );
+      setCacheControl(res, options, 'metadata');
       return res.send(info);
     });
 

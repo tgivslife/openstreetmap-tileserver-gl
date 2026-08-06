@@ -4,6 +4,15 @@ services:
     image: stsdockerhub/tileserver-gl-light:5.7.0-pre.0
     volumes:
       - "./data:/data"
-    command: [ "--verbose", "--config", "/data/config.json" ]
+    # --silent logs only non-200/304 responses (errors), keeping the access log quiet on a tile server.
+    # --log_format prepends an ISO-8601 timestamp to the default `tiny` fields so lines are self-contained
+    #   (redundant if your log collector already stamps ingestion time; keep for file logs / plain `docker logs`).
+    # The ?key= value is redacted regardless of format.
+    command:
+      - "--silent"
+      - "--log_format"
+      - ":date[iso] :method :url :status :res[content-length] - :response-time ms"
+      - "--config"
+      - "/data/config.json"
     ports:
       - "8081:8080"

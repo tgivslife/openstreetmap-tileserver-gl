@@ -666,3 +666,60 @@ export async function fetchTileData(source, sourceType, z, x, y) {
     });
   }
 }
+
+/**
+ * Default Cache-Control values per response category.
+ *
+ * `tile` and `metadata` describe content that only changes when the archives or styles are rebuilt, so they carry a day
+ * of freshness plus a week of stale-while-revalidate.
+ * `asset` covers glyph ranges and sprite sheets, which are fixed for the lifetime of a deployment.
+ * Viewer HTML is never cached, so a redeployment is picked up immediately.
+ */
+const defaultCacheControl = {
+  tile: 'public, max-age=86400, stale-while-revalidate=604800',
+  asset: 'public, max-age=31536000, immutable',
+  metadata: 'public, max-age=3600',
+  static: 'public, max-age=86400',
+  html: 'no-cache',
+};
+
+/**
+ * Resolves the Cache-Control header for a category of response.
+ *
+ * Set `options.cacheControl` to false in the config to suppress the headers
+ * entirely, or to an object keyed by category to override individual values
+ * (a per-category false suppresses just that one).
+ * @param {object} options - The `options` block from the config file.
+ * @param {string} category - One of tile, asset, metadata, static, html.
+ * @returns {string|null} - Header value, or null when no header should be set.
+ */
+export function getCacheControl(options, category) {
+  const configured = options?.cacheControl;
+  if (configured === false) {
+    return null;
+  }
+  // eslint-disable-next-line security/detect-object-injection -- category is an internal literal, not user input
+  const override = configured?.[category];
+  if (override === false || override === null) {
+    return null;
+  }
+  if (typeof override === 'string') {
+    return override;
+  }
+  // eslint-disable-next-line security/detect-object-injection -- category is an internal literal, not user input
+  return defaultCacheControl[category] ?? null;
+}
+
+/**
+ * Sets the Cache-Control header for a category, unless it is suppressed.
+ * @param {object} res - Express response object.
+ * @param {object} options - The `options` block from the config file.
+ * @param {string} category - One of tile, asset, metadata, static, html.
+ * @returns {void}
+ */
+export function setCacheControl(res, options, category) {
+  const value = getCacheControl(options, category);
+  if (value) {
+    res.set('Cache-Control', value);
+  }
+}

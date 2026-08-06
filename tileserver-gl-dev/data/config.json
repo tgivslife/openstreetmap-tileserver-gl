@@ -12,32 +12,35 @@
   "styles": {
     "osm-openmaptiles": {
       "style": "osm-openmaptiles/style.json",
-      "mapping": { "planet-planetiler": "romania-tilemaker" }
+      "mapping": { "planet-planetiler": "planet-tilemaker" }
     },
     "osm-openmaptiles-dark": {
       "style": "osm-openmaptiles-dark/style.json",
-      "mapping": { "planet-planetiler": "romania-tilemaker" }
+      "mapping": { "planet-planetiler": "planet-tilemaker" }
     },
     "streets-v2": {
       "style": "streets-v2/style.json",
-      "mapping": { "planet-planetiler": "romania-tilemaker" }
+      "mapping": { "planet-planetiler": "planet-tilemaker" }
     },
     "streets-v2-dark": {
       "style": "streets-v2-dark/style.json",
-      "mapping": { "planet-planetiler": "romania-tilemaker" }
+      "mapping": { "planet-planetiler": "planet-tilemaker" }
     },
     "basic-v2": {
       "style": "basic-v2/style.json",
-      "mapping": { "planet-planetiler": "romania-tilemaker" }
+      "mapping": { "planet-planetiler": "planet-tilemaker" }
     },
     "basic-v2-dark": {
       "style": "basic-v2-dark/style.json",
-      "mapping": { "planet-planetiler": "romania-tilemaker" }
+      "mapping": { "planet-planetiler": "planet-tilemaker" }
     }
   },
   "data": {
     "romania-tilemaker": {
       "mbtiles": "romania-latest.tilemaker.mbtiles"
+    },
+    "planet-tilemaker": {
+      "mbtiles": "planet-latest.tilemaker.mbtiles"
     }
   }
 }

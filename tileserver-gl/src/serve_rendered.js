@@ -35,6 +35,7 @@ import {
   fixTileJSONCenter,
   fetchTileData,
   readFile,
+  setCacheControl,
 } from './utils.js';
 import { openPMtiles, getPMtilesInfo } from './pmtiles_adapter.js';
 import { renderOverlay, renderWatermark, renderAttribution } from './render.js';
@@ -838,6 +839,9 @@ async function respondImage(
               'Last-Modified': item.lastModified,
               'Content-Type': `image/${format}`,
             });
+            // Deterministic for a given set of parameters, both for tiles and
+            // for static images.
+            setCacheControl(res, options, 'tile');
             return res.status(200).send(buffer);
           }
         });
@@ -1316,6 +1320,7 @@ export const serve_rendered = {
         undefined,
         allowedHosts,
       );
+      setCacheControl(res, options, 'metadata');
       return res.send(info);
     });
 

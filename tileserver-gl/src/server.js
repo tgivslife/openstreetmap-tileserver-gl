@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'path';
 import fnv1a from '@sindresorhus/fnv1a';
@@ -11,7 +12,6 @@ import enableShutdown from 'http-shutdown';
 import express from 'express';
 import handlebars from 'handlebars';
 import { SphericalMercator } from '@mapbox/sphericalmercator';
-const mercator = new SphericalMercator();
 import morgan from 'morgan';
 import { serve_data } from './serve_data.js';
 import { serve_style } from './serve_style.js';
@@ -19,17 +19,17 @@ import { serve_font } from './serve_font.js';
 import { clearPMtilesCache } from './pmtiles_adapter.js';
 import {
   allowedTileSizes,
-  getTileUrls,
+  getCacheControl,
   getPublicUrl,
+  getTileUrls,
   isValidHttpUrl,
   isValidRemoteUrl,
-  parseAllowedHosts,
-  isHostAllowed,
-  getCandidateHost,
-  getSafeProtocol,
+  setCacheControl,
 } from './utils.js';
 
 import { fileURLToPath } from 'url';
+
+const mercator = new SphericalMercator();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(
   fs.readFileSync(__dirname + '/../package.json', 'utf8'),
@@ -92,6 +92,15 @@ async function start(opts) {
   }
 
   if (process.env.NODE_ENV !== 'test') {
+    // Redact ?key= / &key= from the logged URL so API keys and tokens, which
+    // travel in the query string, are not written to the access log. Overriding
+    // the built-in :url token covers every format (tiny/dev/combined/custom).
+    morgan.token('url', (req) =>
+      (req.originalUrl || req.url).replace(
+        /([?&]key=)[^&]*/gi,
+        '$1[REDACTED]',
+      ),
+    );
     const defaultLogFormat =
       process.env.NODE_ENV === 'production' ? 'tiny' : 'dev';
     const logFormat = opts.logFormat || defaultLogFormat;
@@ -104,6 +113,142 @@ async function start(opts) {
           opts.silent && (res.statusCode === 200 || res.statusCode === 304),
       }),
     );
+  }
+
+  // Optional API-key / TTL-token gate, enabled by env; off (no middleware) when unset. See docs/2.USAGE.md for the env vars and token format.
+  const apiKeys = (process.env.TILESERVER_GL_API_KEYS || '')
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+  const tokenSecret = process.env.TILESERVER_GL_TOKEN_SECRET || '';
+  const parsedMaxTtl = parseInt(
+    process.env.TILESERVER_GL_TOKEN_MAX_TTL || '',
+    10,
+  );
+  const tokenMaxTtl =
+    Number.isFinite(parsedMaxTtl) && parsedMaxTtl > 0 ? parsedMaxTtl : 604800; // 7d
+  const allowedOrigins = (process.env.TILESERVER_GL_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+
+  // Mounted before the auth gate so 403s still carry CORS headers (browser can read the status) and keyless OPTIONS preflights are answered here.
+  // An Origin allowlist reflects only those origins instead of the default *.
+  if (opts.cors) {
+    app.use(
+      cors(allowedOrigins.length ? { origin: allowedOrigins } : undefined),
+    );
+  }
+
+  if (apiKeys.length || tokenSecret) {
+    // Constant-time compare. Hash both sides to a fixed 32-byte digest first: timingSafeEqual throws on unequal lengths,
+    // and the candidate is arbitrary attacker-controlled bytes.
+    // Hashing also drops the length-dependent early return that would leak via timing.
+    const equal = (a, b) => {
+      const ha = crypto.createHash('sha256').update(a, 'utf8').digest();
+      const hb = crypto.createHash('sha256').update(b, 'utf8').digest();
+      return crypto.timingSafeEqual(ha, hb);
+    };
+
+    // Exempt the static viewer chrome in public/resources (bundles, webfonts, images, favicon, index.css),
+    // it's pulled by CSS url()/<img>/favicon requests that can't carry ?key=, so gating it breaks the viewer.
+    const publicAssets = new Set();
+    const assetRoot = path.join(__dirname, '../public/resources');
+    const walkAssets = (dir, urlPrefix) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const url = `${urlPrefix}/${entry.name}`;
+        if (entry.isDirectory()) {
+          walkAssets(path.join(dir, entry.name), url);
+        } else {
+          publicAssets.add(url);
+        }
+      }
+    };
+    try {
+      walkAssets(assetRoot, '');
+    } catch {
+      // resources dir absent (e.g. `npm run prepare` not run): nothing to exempt
+    }
+
+    /**
+     * Validates an expiring token of the form "<expiry>.<signature>".
+     * @param {string} candidate - Value of the key query parameter.
+     * @returns {boolean} - True when the signature matches and is not expired.
+     */
+    const isValidToken = (candidate) => {
+      const dot = candidate.indexOf('.');
+      if (dot < 1) {
+        return false;
+      }
+      const expiry = candidate.slice(0, dot);
+      const signature = candidate.slice(dot + 1);
+      if (!/^\d+$/.test(expiry)) {
+        return false;
+      }
+      // Reject expired tokens and — as a sanity ceiling — any expiry beyond the
+      // max TTL. The finite check matters: a long digit string parses to
+      // Infinity, which would otherwise never look expired (permanent token).
+      const nowSec = Date.now() / 1000;
+      const expirySec = Number(expiry);
+      if (
+        !Number.isFinite(expirySec) ||
+        expirySec < nowSec ||
+        expirySec > nowSec + tokenMaxTtl
+      ) {
+        return false;
+      }
+      const expected = crypto
+        .createHmac('sha256', tokenSecret)
+        .update(expiry)
+        .digest('hex');
+      return equal(signature, expected);
+    };
+
+    app.use((req, res, next) => {
+      if (req.path === '/health') {
+        return next();
+      }
+      if (publicAssets.has(req.path)) {
+        return next();
+      }
+      const candidate = typeof req.query.key === 'string' ? req.query.key : '';
+      const keyOk =
+        (candidate !== '' && apiKeys.some((k) => equal(k, candidate))) ||
+        (tokenSecret !== '' && candidate !== '' && isValidToken(candidate));
+      if (!keyOk) {
+        return res.status(403).send('Forbidden');
+      }
+      if (allowedOrigins.length) {
+        // Hotlink deterrence (not auth). Use the unforgeable Origin, falling back to the Referer's origin since
+        // resource loads (<img>, CSS url()) send only Referer. Neither header = non-browser client, passes on the
+        // key; a page with Referrer-Policy: no-referrer also sends neither.
+        const originHeader = req.get('Origin');
+        let claimed = null;
+        if (originHeader) {
+          claimed = originHeader.replace(/\/$/, '');
+        } else {
+          const referer = req.get('Referer');
+          if (referer) {
+            try {
+              claimed = new URL(referer).origin;
+            } catch {
+              claimed = referer; // unparseable → cannot match → rejected below
+            }
+          }
+        }
+        // Always allow the server's own origin: same-origin requests (the built-in viewer's style.json, tiles, sprites, glyphs) send a Referer
+        // pointing here, which is not in the app-origin allowlist. Safe — a spoofed Host gets no more than sending no Referer already does.
+        const selfOrigin = `${req.protocol}://${req.get('host')}`;
+        if (
+          claimed &&
+          claimed !== selfOrigin &&
+          !allowedOrigins.includes(claimed)
+        ) {
+          return res.status(403).send('Forbidden');
+        }
+      }
+      return next();
+    });
   }
 
   let config = opts.config || null;
@@ -204,12 +349,17 @@ async function start(opts) {
 
   const data = clone(config.data || {});
 
-  if (opts.cors) {
-    app.use(cors());
-  }
+  // Shared by the two express.static mounts below.
+  const staticCacheControl = getCacheControl(options, 'static');
+  const staticOptions = staticCacheControl
+    ? {
+        setHeaders: (staticRes) =>
+          staticRes.set('Cache-Control', staticCacheControl),
+      }
+    : {};
 
   app.use('/data/', serve_data.init(options, serving.data, opts));
-  app.use('/files/', express.static(paths.files));
+  app.use('/files/', express.static(paths.files, staticOptions));
   app.use('/styles/', serve_style.init(options, serving.styles, opts));
   if (!isLight) {
     startupPromises.push(
@@ -640,6 +790,7 @@ async function start(opts) {
         )}styles/${id}/style.json${query}`,
       });
     }
+    setCacheControl(res, options, 'metadata');
     res.send(result);
   });
 
@@ -699,6 +850,7 @@ async function start(opts) {
    * @returns {void}
    */
   app.get('/data.json', (req, res) => {
+    setCacheControl(res, options, 'metadata');
     res.send(addTileJSONs([], req, 'data', undefined));
   });
 
@@ -712,6 +864,7 @@ async function start(opts) {
    */
   app.get('{/:tileSize}/index.json', (req, res, next) => {
     const tileSize = allowedTileSizes(req.params['tileSize']);
+    setCacheControl(res, options, 'metadata');
     res.send(
       addTileJSONs(
         addTileJSONs([], req, 'rendered', parseInt(tileSize, 10)),
@@ -724,7 +877,10 @@ async function start(opts) {
 
   // ------------------------------------
   // serve web presentations
-  app.use('/', express.static(path.join(__dirname, '../public/resources')));
+  app.use(
+    '/',
+    express.static(path.join(__dirname, '../public/resources'), staticOptions),
+  );
 
   const templates = path.join(__dirname, '../public/templates');
 
@@ -770,6 +926,9 @@ async function start(opts) {
               ? `?key=${encodeURIComponent(req.query.key)}`
               : '';
             if (template === 'wmts') res.set('Content-Type', 'text/xml');
+            // Viewer markup is not versioned, so it must not be cached or a
+            // redeploy would keep serving the old page.
+            setCacheControl(res, options, 'html');
             return res.status(200).send(compiled(data));
           } else {
             if (opts.verbose >= 1) {
@@ -1005,6 +1164,8 @@ async function start(opts) {
    * @returns {void}
    */
   app.get('/health', (req, res) => {
+    // Never cache: a probe must see the current state, not a stored answer.
+    res.set('Cache-Control', 'no-store');
     if (startupComplete) {
       return res.status(200).send('OK');
     } else {

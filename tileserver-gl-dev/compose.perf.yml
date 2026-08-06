@@ -1,0 +1,34 @@
+# Performance-testing stack: serves /data from the Docker named volume `ts_data`
+# (WSL2/Linux ext4) instead of the Windows bind mount used by compose.yml.
+#
+# Why: a bind mount from a Windows drive crosses a slow 9p/virtiofs layer;
+# random mbtiles reads over it dominate latency (~5x slower in testing) while
+# the server sits CPU-idle — an artifact that masks real throughput. A named
+# volume removes it. See k6/README.md for the one-time populate step and run
+# commands.
+#
+# Standalone on purpose (run with `-f compose.perf.yml`, not as an auto-merged
+# compose.override.yml): the override name would apply to every `docker compose
+# up`, replacing the dev bind mount — and with it live style/config editing.
+#
+#   docker compose -f compose.perf.yml up -d
+#
+services:
+  tileserver-gl:
+    container_name: tileserver-perf
+    image: stsdockerhub/tileserver-gl-light:5.7.0-pre.0
+    volumes:
+      - "ts_data:/data"
+    # --ignore-missing-files: the volume omits the 95 GB planet mbtiles, so the
+    # planet-tilemaker data source is skipped instead of aborting startup.
+    command:
+      - "--silent"
+      - "--ignore-missing-files"
+      - "--config"
+      - "/data/config.json"
+    ports:
+      - "8081:8080"
+
+volumes:
+  ts_data:
+    external: true # created and populated per k6/README.md
