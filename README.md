@@ -14,10 +14,11 @@ The pipeline has two halves:
 
 ## Repository layout
 
-| Path                | Contents                                                                                              |
-|---------------------|-------------------------------------------------------------------------------------------------------|
-| `tileserver-gl/`    | Vendored tileserver-gl sources (v5.7.0-pre.0) plus the Docker builds for the full and light images.     |
-| `tileserver-gl-dev/`| A ready-to-run local environment: `compose.yml` and a `data/` directory with styles, fonts and config. |
+| Path                 | Contents                                                                                                                                                              |
+|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `tileserver-gl/`     | Vendored tileserver-gl sources (v5.7.0-pre.0) and three Docker builds: `Dockerfile` (full), `Dockerfile_light` (vector-only), `Dockerfile_light_s3` (light + baked assets for stateless S3 deployment). |
+| `tileserver-gl-data/`| Portable map assets — `config.json`, `styles/`, `fonts/` — mounted by the dev compose and baked into the S3 image.                                                    |
+| `tileserver-gl-dev/` | Ready-to-run local environments: `compose.yml` (local mbtiles), `compose.s3.yml` (S3/MinIO), `compose.perf.yml` (k6), and `data/` holding the tile databases.          |
 
 - [OpenMapTiles](#openmaptiles)
 - [Planetiler](#planetiler)
@@ -69,15 +70,22 @@ Copy the resulting archive into `tileserver-gl-dev/data/mbtiles/` to serve it.
 Vector and raster maps with GL styles. Server-side rendering by MapLibre GL Native. Map tile server for
 MapLibre GL JS, Android, iOS, Leaflet, OpenLayers, GIS via WMTS, etc.
 
-The sources live in [`tileserver-gl/`](tileserver-gl/README.md) and build into two images:
+The sources live in [`tileserver-gl/`](tileserver-gl/README.md) and build into three images:
 
-* `stsdockerhub/tileserver-gl` — full build, renders raster tiles, static map images and elevation queries.
-* `stsdockerhub/tileserver-gl-light` — vector tiles, styles, fonts and sprites only; much smaller, no GL stack.
+* `stsdockerhub/tileserver-gl` — full build (`Dockerfile`): renders raster tiles, static map images and elevation queries.
+* `stsdockerhub/tileserver-gl-light` — vector tiles, styles, fonts and sprites only (`Dockerfile_light`); much smaller, no GL stack.
+* `stsdockerhub/tileserver-gl-light:<ver>-s3` — the **same** light image, with this deployment's `config.json`, `styles/` and `fonts/` baked in from `tileserver-gl-data/` (`Dockerfile_light_s3`); a stateless container that reads tiles from S3. Same repository as the light image — the `-s3` tag suffix distinguishes the baked variant.
 
 ```bash
 cd tileserver-gl
 docker build . -t stsdockerhub/tileserver-gl:5.7.0-pre.0
 docker build -f Dockerfile_light . -t stsdockerhub/tileserver-gl-light:5.7.0-pre.0
+
+# S3 image = light base + assets from ../tileserver-gl-data (two-step build).
+# Same repository, `-s3` tag suffix marks the baked variant.
+docker build -f Dockerfile_light_s3 ../tileserver-gl-data \
+  --build-arg BASE=stsdockerhub/tileserver-gl-light:5.7.0-pre.0 \
+  -t stsdockerhub/tileserver-gl-light:5.7.0-pre.0-s3
 ```
 
 Documentation: [Install](tileserver-gl/docs/1.INSTALL.md) ·
@@ -85,9 +93,45 @@ Documentation: [Install](tileserver-gl/docs/1.INSTALL.md) ·
 [Configuration](tileserver-gl/docs/3.CONFIG.md) ·
 [Deployment](tileserver-gl/docs/4.DEPLOYMENT.md)
 
+### Serving tiles from S3 / object storage
+
+A data source can point at object storage instead of a local file, so the container carries no tile data:
+
+```json
+"data": { "planet": { "pmtiles": "s3+https://minio.example.com/tiles/planet.pmtiles", "s3Region": "us-east-1" } }
+```
+
+Schemes: `s3://…` (AWS S3), `s3+https://…` / `s3+http://…` (self-hosted MinIO, Ceph, R2, …), or plain
+`https://…` (range reads, no auth). Private buckets are read with credentials from the standard AWS chain —
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, a mounted `~/.aws` profile via `s3Profile`, or an IAM role —
+never inline in `config.json`, so the bucket never has to be public.
+
+Any string in `config.json` may reference the environment as `${VAR}` or `${VAR:-default}` (shell-style: the
+default applies when the variable is unset or empty). So a single **baked** config retargets per deployment
+without a rebuild — the S3 config uses `"pmtiles": "${PMTILES_URL:-…}"`, and you set `PMTILES_URL` (compose
+env, k8s env) to your bucket; unset, it falls back to the MinIO demo URL.
+[`tileserver-gl-dev/compose.s3.yml`](tileserver-gl-dev/compose.s3.yml) runs the baked
+`tileserver-gl-light:local-s3` image against a local MinIO (private bucket, SigV4) end to end.
+
+## Environment variables
+
+All optional. Secrets (API keys, token secret, AWS credentials) come from the environment and are **never**
+read from `config.json`; non-secret config values can be parameterized with `${VAR}` / `${VAR:-default}`
+([details](tileserver-gl/docs/3.CONFIG.md#environment-variable-substitution)). Full descriptions:
+[USAGE.md](tileserver-gl/docs/2.USAGE.md#environment-variables).
+
+| Group | Variables |
+|-------|-----------|
+| **Server** | `PORT`, `BIND`, `PUBLIC_URL` (public base URL), `NODE_ENV`, `UV_THREADPOOL_SIZE` |
+| **Auth / security** | `TILESERVER_GL_API_KEYS`, `TILESERVER_GL_TOKEN_SECRET`, `TILESERVER_GL_TOKEN_MAX_TTL`, `TILESERVER_GL_ALLOWED_ORIGINS`, `TILESERVER_GL_ALLOWED_HOSTS` |
+| **Metrics** | `TILESERVER_GL_METRICS`, `TILESERVER_GL_METRICS_ZOOM`, `METRICS_PORT` |
+| **S3 (PMTiles)** | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_REGION`, `AWS_PROFILE` |
+| **Config `${VAR}` (this project)** | `PMTILES_URL`, `TILE_CACHE_CONTROL` — author-chosen names used by the baked S3 config |
+
 ## Running locally
 
-`tileserver-gl-dev/` holds a compose file and a `/data` volume with everything except the tiles themselves.
+`tileserver-gl-dev/` holds the compose files and a `data/` directory with `config.json` and the tile
+databases; the styles and fonts come from `../tileserver-gl-data`.
 
 ```bash
 cd tileserver-gl-dev
@@ -98,17 +142,25 @@ docker compose up
 
 The map is then served at <http://localhost:8081/>.
 
-What is in `tileserver-gl-dev/data/`:
+The assets are split across two folders.
 
-* `config.json` — serves six styles and declares one data source. `serveAllFonts` is on.
-* `styles/` — `openstreetmap`, `osm-openmaptiles`, `osm-openmaptiles-dark`, `osm-liberty`, `streets`,
-  `streets-v2`, `streets-v3`, each with its own sprite sheet. `osm-openmaptiles` is the MapTiler
-  OpenStreetMap style localized to this server: tiles from the configured data source, glyphs from
-  `data/fonts/`, sprites from the style folder, and no API key.
-Both `osm-openmaptiles` and `osm-openmaptiles-dark` are MapTiler styles localized the same way — tiles from
-the configured data source, glyphs from `data/fonts/`, sprites from the style folder. The dark one carries
-its **own** sprite sheet (MapTiler ships a separate one whose icons are drawn for dark backgrounds), so its
-POI and peak icons stay legible.
+`tileserver-gl-data/` — portable map assets (mounted into `/data` by the dev compose, baked into the S3 image):
+
+* `styles/` — `osm-openmaptiles`, `streets-v2`, `basic-v2`, and a `-dark` sibling of each, every one with its
+  own sprite sheet. They are MapTiler styles localized to this server: tiles from the configured data source,
+  glyphs from `fonts/`, sprites from the style folder, and no API key. Each `-dark` variant carries its
+  **own** sprite sheet (MapTiler ships a separate one drawn for dark backgrounds) so POI and peak icons stay
+  legible.
+* `fonts/` — 28 glyph sets (Noto Sans, Open Sans and variants).
+* `config.json` — the configuration baked into the S3 image; it points a data source at the object store. The
+  local dev stack uses its own config under `tileserver-gl-dev/data/` instead.
+
+`tileserver-gl-dev/data/` — local, machine-specific data:
+
+* `config.json` — the dev configuration; maps the styles onto a local mbtiles source. `serveAllFonts` is on.
+* `mbtiles/` — where the generated tile archive goes (the archives themselves are gitignored).
+* `pmtiles/` — must exist because `config.json` declares `paths.pmtiles`, even when unused; every configured
+  path is checked at startup and a missing one aborts with `The specified path for "pmtiles" does not exist`.
 
 Style edits are picked up without a restart:
 
@@ -135,19 +187,14 @@ The template ships inside the image, so changing it needs a rebuild:
 docker build tileserver-gl -t stsdockerhub/tileserver-gl:5.7.0-pre.0
 docker compose -f tileserver-gl-dev/compose.yml up -d --force-recreate
 ```
-* `fonts/` — 28 glyph sets (Noto Sans, Open Sans, Roboto and variants).
-* `mbtiles/` — where the generated tile archive goes (the archives themselves are gitignored).
-* `pmtiles/` — must exist because `config.json` declares `paths.pmtiles`, even when unused. Every configured
-  path is checked at startup and a missing one aborts with
-  `The specified path for "pmtiles" does not exist`.
 
 Every style references its tiles as `mbtiles://{planet-planetiler}`, and `config.json` maps that name onto a
 real data source:
 
 ```json
   "styles": {
-    "openstreetmap": {
-      "style": "openstreetmap/style.json",
+    "osm-openmaptiles": {
+      "style": "osm-openmaptiles/style.json",
       "mapping": { "planet-planetiler": "romania-tilemaker" }
     }
   },

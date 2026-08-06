@@ -1,0 +1,128 @@
+# End-to-end S3 / PMTiles stack: a STATELESS tileserver-gl image (built from
+# tileserver-gl/Dockerfile_light_s3, which bakes config.json + styles + fonts
+# from ../tileserver-gl-data) reads a PMTiles tileset from a PRIVATE MinIO
+# bucket over the credentialed S3 path (SigV4). It exercises the s3+http://
+# custom-endpoint support and shows no public bucket policy is needed — the
+# access key/secret authorize the reads. The container carries no tile data and
+# mounts nothing.
+#
+# 1. Build the generic light base once (no deployment-specific content):
+#
+#      docker build -f ../tileserver-gl/Dockerfile_light ../tileserver-gl \
+#        -t tileserver-gl-light:local
+#
+#    (compose builds the thin s3 child below, but cannot build this base for it
+#    — depends_on orders startup, not builds.)
+#
+# 2. Generate the tileset once (mbtiles -> pmtiles). The go-pmtiles image is
+#    distroless (no shell), so this is a plain `convert`, guarded by a profile
+#    so it never runs on a normal `up`:
+#
+#      docker compose -f compose.s3.yml --profile setup run --rm convert
+#
+#    It writes ./data/pmtiles/romania.pmtiles and errors if that file already
+#    exists — delete it to regenerate.
+#
+# 3. Bring the stack up (builds the s3 child image on first run):
+#
+#      docker compose -f compose.s3.yml up -d --build
+#
+#      MinIO console : http://localhost:9101   (minioadmin / minioadmin)
+#      Tileserver    : http://localhost:8082
+#      A tile        : http://localhost:8082/data/planet-s3/10/582/366.pbf
+#
+# 4. Tear down (add -v to also drop the MinIO volume):
+#
+#      docker compose -f compose.s3.yml down
+#
+# Credentials: the tileserver receives the MinIO key/secret as AWS_ACCESS_KEY_ID
+# / AWS_SECRET_ACCESS_KEY; the AWS SDK default provider chain picks them up and
+# signs every GetObject. Nothing is made public. For real AWS S3 instead of
+# MinIO, drop the `minio*` services, set the same two env vars (or use an IAM
+# role) and point the baked config's data source at "s3://<bucket>/<key>.pmtiles".
+
+name: tileserver-s3
+
+x-minio-creds: &minio-creds
+  MINIO_ROOT_USER: minioadmin
+  MINIO_ROOT_PASSWORD: minioadmin
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      <<: *minio-creds
+    ports:
+      - "9100:9000" # S3 API
+      - "9101:9001" # web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: create the (private) bucket and upload the tileset, then exit.
+  minio-setup:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      <<: *minio-creds
+    volumes:
+      - ./data/pmtiles/romania.pmtiles:/import/romania.pmtiles:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing local/tiles
+        mc cp /import/romania.pmtiles local/tiles/romania.pmtiles
+        echo "bucket 'tiles' ready (private); object uploaded."
+
+  # Stateless: config/styles/fonts are baked in (see Dockerfile_light_s3); the
+  # only runtime input is the S3 tile data and the credentials below. No mounts.
+  tileserver-gl:
+    build:
+      context: ../tileserver-gl-data # holds config.json, styles/, fonts/
+      dockerfile: ../tileserver-gl/Dockerfile_light_s3
+    image: tileserver-gl-light:local-s3
+    depends_on:
+      minio-setup:
+        condition: service_completed_successfully
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+      # The baked config.json reads PMTILES_URL (falling back to this MinIO URL
+      # if unset). For real AWS you'd set e.g. s3://my-bucket/planet.pmtiles here
+      # — same image, no rebuild.
+      PMTILES_URL: s3+http://minio:9000/tiles/romania.pmtiles
+      # Public base URL (env fallback added in main.js); also silences the
+      # host-header security warning.
+      PUBLIC_URL: http://localhost:8082
+      # Host-header allowlist — the dedicated env var, kept out of config.json.
+      TILESERVER_GL_ALLOWED_HOSTS: localhost
+      # Optional: override the baked config's ${TILE_CACHE_CONTROL}.
+      # TILE_CACHE_CONTROL: "public, max-age=3600"
+    command:
+      - "--config"
+      - "/data/config.json"
+    ports:
+      - "8082:8080"
+
+  # Optional one-time tileset generation (mbtiles -> pmtiles), see header step 1.
+  convert:
+    image: protomaps/go-pmtiles:latest
+    profiles: ["setup"]
+    volumes:
+      - ./data/mbtiles:/mb:ro
+      - ./data/pmtiles:/pm
+    command:
+      ["convert", "/mb/romania-latest.tilemaker.mbtiles", "/pm/romania.pmtiles"]
+
+volumes:
+  minio_data:

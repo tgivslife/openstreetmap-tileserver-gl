@@ -251,12 +251,37 @@ async function start(opts) {
     });
   }
 
+  // Expand ${VAR} / ${VAR:-default} from the environment in every string value,
+  // so a baked or committed config.json can point at per-deployment values
+  // (e.g. an S3 URL or region) without editing the file. `:-` falls back when a
+  // variable is unset or empty (like the shell); an unset ${VAR} with no default
+  // is left as-is so the resulting error names the missing variable.
+  const interpolateEnv = (value) => {
+    if (typeof value === 'string') {
+      return value.replace(
+        /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g,
+        (match, name, fallback) => {
+          const v = process.env[name];
+          if (v !== undefined && v !== '') return v;
+          return fallback !== undefined ? fallback : match;
+        },
+      );
+    }
+    if (Array.isArray(value)) return value.map(interpolateEnv);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value).map(([k, v]) => [k, interpolateEnv(v)]),
+      );
+    }
+    return value;
+  };
+
   let config = opts.config || null;
   let configPath = null;
   if (opts.configPath) {
     configPath = path.resolve(opts.configPath);
     try {
-      config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      config = interpolateEnv(JSON.parse(fs.readFileSync(configPath, 'utf8')));
     } catch {
       console.log('ERROR: Config file not found or invalid!');
       console.log('   See README.md for instructions and sample data.');

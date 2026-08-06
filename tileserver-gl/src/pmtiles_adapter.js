@@ -85,6 +85,19 @@ class S3Source {
     let profile = null;
     let requestPayer = false;
 
+    // s3+http:// and s3+https:// name a custom (S3-compatible) endpoint and pin
+    // its protocol; plain s3:// is AWS S3 over https. Strip the prefix down to
+    // the s3:// the patterns below expect, keep the protocol for the endpoint
+    // URL, and treat it as a custom endpoint (its host may carry a port and no
+    // dot, which auto-detection would otherwise mistake for a bucket name).
+    let endpointProtocol = 'https';
+    const schemeMatch = url.match(/^s3\+(https?):\/\//i);
+    if (schemeMatch) {
+      endpointProtocol = schemeMatch[1].toLowerCase();
+      url = 's3://' + url.slice(schemeMatch[0].length);
+      s3UrlFormat = 'custom';
+    }
+
     // Parse URL parameters
     const [cleanUrl, queryString] = url.split('?');
     if (queryString) {
@@ -100,7 +113,7 @@ class S3Source {
 
     // Helper to build result object
     const buildResult = (endpoint, bucket, key) => ({
-      endpoint: endpoint ? `https://${endpoint}` : null,
+      endpoint: endpoint ? `${endpointProtocol}://${endpoint}` : null,
       bucket,
       key,
       region,

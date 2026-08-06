@@ -1,0 +1,38 @@
+# Stateless S3/PMTiles deployment image.
+#
+# The generic light image (Dockerfile_light) plus this deployment's small,
+# static assets — config.json, styles, fonts — baked into /data, so the only
+# thing the container fetches at runtime is tile *data*, from S3 / an
+# S3-compatible store. No volume, no bind mount: the pod carries its map assets
+# and is fully stateless. Tile databases (mbtiles/pmtiles) are never baked in.
+#
+# This is a thin child of tileserver-gl-light; the base carries all the code and
+# dependencies (including @aws-sdk/client-s3 and pmtiles). The build context is
+# the assets folder ../tileserver-gl-data, NOT this repo — that is where
+# config.json, styles/ and fonts/ live.
+#
+# Two-step build (the base has no deployment-specific content, build it once):
+#
+#   docker build -f Dockerfile_light . -t tileserver-gl-light:local
+#   docker build -f Dockerfile_light_s3 ../tileserver-gl-data -t tileserver-gl-light:local-s3
+#
+# Run (credentials via the standard AWS chain — env vars here; the baked
+# config.json points at the bucket):
+#
+#   docker run --rm -p 8080:8080 \
+#     -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
+#     tileserver-gl-light:local-s3 --config /data/config.json
+#
+# tileserver-gl-dev/compose.s3.yml builds and runs this against a local MinIO.
+
+# Base image tag, overridable: --build-arg BASE=tileserver-gl-light:5.7.0-pre.0
+ARG BASE=tileserver-gl-light:local
+FROM ${BASE}
+
+# Baked assets, owned by the runtime user. Fonts dominate the size (~120 MB for
+# the full Noto + Open Sans set); in production bake only the fonts your styles
+# reference to keep the image small. There is no VOLUME on /data in the base, so
+# these files are served as-is instead of being shadowed by an empty volume.
+COPY --chown=node:node config.json /data/config.json
+COPY --chown=node:node styles      /data/styles
+COPY --chown=node:node fonts       /data/fonts

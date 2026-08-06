@@ -10,7 +10,19 @@
 # with them the whole GL stack (mesa + LLVM software rasterizer, GLFW, Xvfb)
 # and the cairo/pango/rsvg image stack.
 #
-#   docker build -f Dockerfile.light . -t tileserver-gl-light
+# Data source is orthogonal to the image. The same build serves either:
+#   * local files under /data (a bind mount in dev, or baked into a child
+#     image) — the traditional layout; or
+#   * remote PMTiles on S3 / any S3-compatible store (MinIO, R2, …) or plain
+#     HTTP, by pointing a config.json data source at an s3://, s3+https://,
+#     s3+http:// or https:// URL. The @aws-sdk/client-s3 and pmtiles packages
+#     that make this work already ship here; nothing extra is installed.
+#     Credentials come from the standard AWS chain (AWS_ACCESS_KEY_ID /
+#     AWS_SECRET_ACCESS_KEY env vars, a mounted ~/.aws profile via s3Profile,
+#     or an IAM role) — never from config.json. See tileserver-gl-dev/
+#     compose.s3.yml for a private-bucket MinIO example.
+#
+#   docker build -f Dockerfile_light . -t tileserver-gl-light
 
 FROM ubuntu:noble AS builder
 
@@ -117,6 +129,7 @@ RUN mkdir -p /home/node/.aws && \
 
 ENV \
     NODE_ENV="production" \
+    HOME="/home/node" \
     CHOKIDAR_USEPOLLING=1 \
     CHOKIDAR_INTERVAL=500 \
     LD_PRELOAD="/usr/lib/libjemalloc.so" \
@@ -143,8 +156,12 @@ RUN node -e ' \
     ' && \
     rm -rf /usr/src/app/src/serve_rendered.js /usr/src/app/src/render.js
 
+# No VOLUME on /data. A tile server never writes there, so an anonymous volume
+# buys nothing — and it actively hurts the two ways /data is populated: it masks
+# assets baked into a child image (see Dockerfile_light_s3) by seeding a separate
+# stateful volume, and it leaves a stray volume behind on stateless deployments.
+# A bind mount (dev) or a child image's baked files serve /data directly.
 RUN mkdir -p /data && chown node:node /data
-VOLUME /data
 WORKDIR /data
 
 EXPOSE 8080

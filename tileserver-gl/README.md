@@ -38,7 +38,23 @@ For further details see [INSTALL.md](docs/1.INSTALL.md).
 
     docker run --rm -it -v $(pwd):/data -p 8080:8080 stsdockerhub/tileserver-gl:5.7.0-pre.0 --config /data/config.json
 
-For CLI options, environment variables and the full endpoint reference see [USAGE.md](docs/2.USAGE.md).
+For CLI options and the full endpoint reference see [USAGE.md](docs/2.USAGE.md).
+
+## Environment variables
+
+All optional; grouped below, with full descriptions in
+[USAGE.md](docs/2.USAGE.md#environment-variables).
+
+| Group | Variables |
+|-------|-----------|
+| **Server** | `PORT`, `BIND`, `PUBLIC_URL`, `NODE_ENV`, `UV_THREADPOOL_SIZE` |
+| **Auth / security** | `TILESERVER_GL_API_KEYS`, `TILESERVER_GL_TOKEN_SECRET`, `TILESERVER_GL_TOKEN_MAX_TTL`, `TILESERVER_GL_ALLOWED_ORIGINS`, `TILESERVER_GL_ALLOWED_HOSTS` |
+| **Metrics** | `TILESERVER_GL_METRICS`, `TILESERVER_GL_METRICS_ZOOM`, `METRICS_PORT` |
+| **S3 (PMTiles)** | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_REGION`, `AWS_PROFILE` |
+
+Secrets (API keys, token secret, AWS credentials) are read from the environment, never from `config.json`.
+Non-secret config values can be parameterized in `config.json` with `${VAR}` / `${VAR:-default}` — see
+[CONFIG.md](docs/3.CONFIG.md#environment-variable-substitution).
 
 ## Configuration file
 

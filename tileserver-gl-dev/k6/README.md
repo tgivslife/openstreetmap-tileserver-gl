@@ -44,11 +44,14 @@ resolves):
 
 ```powershell
 docker volume create ts_data
-docker run --rm -v ts_data:/dest -v "${PWD}\data:/src:ro" alpine sh -c `
-  "mkdir -p /dest/mbtiles /dest/pmtiles; cp -a /src/config.json /src/fonts /src/styles /dest/; cp /src/mbtiles/romania-latest.tilemaker.mbtiles /dest/mbtiles/; sed -i '/mapping/ s/planet-tilemaker/romania-tilemaker/g' /dest/config.json"
+docker run --rm -v ts_data:/dest -v "${PWD}\data:/src:ro" -v "${PWD}\..\tileserver-gl-data:/assets:ro" alpine sh -c `
+  "mkdir -p /dest/mbtiles /dest/pmtiles; cp -a /src/config.json /dest/; cp -a /assets/fonts /assets/styles /dest/; cp /src/mbtiles/romania-latest.tilemaker.mbtiles /dest/mbtiles/; sed -i '/mapping/ s/planet-tilemaker/romania-tilemaker/g' /dest/config.json"
 
 docker compose -f compose.perf.yml up -d       # serves off ts_data on :8081
 ```
+
+(config.json + tile databases come from `./data`; styles and fonts from the
+shared `../tileserver-gl-data` folder.)
 
 Then run k6 against it. To take the k6↔server host hop out too, run k6 as a
 container on the same network:

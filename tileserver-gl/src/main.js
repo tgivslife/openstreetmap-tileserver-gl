@@ -78,7 +78,7 @@ program
   .option('-C|--no-cors', 'Disable Cross-origin resource sharing headers')
   .option(
     '-u|--public_url <url>',
-    'Enable exposing the server on subpaths, not necessarily the root of the domain',
+    'Enable exposing the server on subpaths, not necessarily the root of the domain (env: PUBLIC_URL)',
   )
   .option(
     '-V, --verbose [level]',
@@ -124,7 +124,8 @@ const opts = program.opts();
 console.log(`Starting ${packageJson.name} v${packageJson.version}`);
 
 const startServer = (configPath, config) => {
-  let publicUrl = opts.public_url;
+  // CLI flag wins; fall back to the PUBLIC_URL env var (mirrors --metrics/PORT).
+  let publicUrl = opts.public_url || process.env.PUBLIC_URL;
   if (publicUrl && publicUrl.lastIndexOf('/') !== publicUrl.length - 1) {
     publicUrl += '/';
   }
@@ -153,7 +154,7 @@ const startServer = (configPath, config) => {
       '  Response URLs may be built from untrusted Host/X-Forwarded-* headers.',
     );
     console.warn(
-      '  For production, set --public_url or allowedHosts in config/options or TILESERVER_GL_ALLOWED_HOSTS env.',
+      '  For production, set --public_url / PUBLIC_URL, allowedHosts in config, or TILESERVER_GL_ALLOWED_HOSTS env.',
     );
   }
   return server({

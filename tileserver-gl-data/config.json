@@ -1,0 +1,45 @@
+{
+  "options": {
+    "paths": {
+      "root": "/data",
+      "fonts": "fonts",
+      "styles": "styles"
+    },
+    "serveAllFonts": true,
+    "cacheControl": {
+      "tile": "${TILE_CACHE_CONTROL:-public, max-age=86400, stale-while-revalidate=604800}"
+    }
+  },
+  "styles": {
+    "osm-openmaptiles": {
+      "style": "osm-openmaptiles/style.json",
+      "mapping": { "planet-planetiler": "planet-s3" }
+    },
+    "osm-openmaptiles-dark": {
+      "style": "osm-openmaptiles-dark/style.json",
+      "mapping": { "planet-planetiler": "planet-s3" }
+    },
+    "streets-v2": {
+      "style": "streets-v2/style.json",
+      "mapping": { "planet-planetiler": "planet-s3" }
+    },
+    "streets-v2-dark": {
+      "style": "streets-v2-dark/style.json",
+      "mapping": { "planet-planetiler": "planet-s3" }
+    },
+    "basic-v2": {
+      "style": "basic-v2/style.json",
+      "mapping": { "planet-planetiler": "planet-s3" }
+    },
+    "basic-v2-dark": {
+      "style": "basic-v2-dark/style.json",
+      "mapping": { "planet-planetiler": "planet-s3" }
+    }
+  },
+  "data": {
+    "planet-s3": {
+      "pmtiles": "${PMTILES_URL:-s3+http://minio:9000/tiles/romania.pmtiles}",
+      "s3Region": "${AWS_REGION:-us-east-1}"
+    }
+  }
+}
