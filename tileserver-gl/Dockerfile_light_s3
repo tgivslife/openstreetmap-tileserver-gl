@@ -6,26 +6,31 @@
 # S3-compatible store. No volume, no bind mount: the pod carries its map assets
 # and is fully stateless. Tile databases (mbtiles/pmtiles) are never baked in.
 #
-# This is a thin child of tileserver-gl-light; the base carries all the code and
+# This is a thin child of the light image; the base carries all the code and
 # dependencies (including @aws-sdk/client-s3 and pmtiles). The build context is
 # the assets folder ../tileserver-gl-data, NOT this repo — that is where
 # config.json, styles/ and fonts/ live.
 #
-# Two-step build (the base has no deployment-specific content, build it once):
+# Two-step build (the base has no deployment-specific content, build it once).
+# Pass BASE explicitly — no build in this repo produces the default tag below:
 #
-#   docker build -f Dockerfile_light . -t tileserver-gl-light:local
-#   docker build -f Dockerfile_light_s3 ../tileserver-gl-data -t tileserver-gl-light:local-s3
+#   docker build -f Dockerfile_light . \
+#     -t stsdockerhub/tileserver-gl:<ver>-light
+#   docker build -f Dockerfile_light_s3 ../tileserver-gl-data \
+#     --build-arg BASE=stsdockerhub/tileserver-gl:<ver>-light \
+#     -t stsdockerhub/tileserver-gl:<ver>-light-s3
 #
 # Run (credentials via the standard AWS chain — env vars here; the baked
 # config.json points at the bucket):
 #
 #   docker run --rm -p 8080:8080 \
 #     -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
-#     tileserver-gl-light:local-s3 --config /data/config.json
+#     stsdockerhub/tileserver-gl:<ver>-light-s3 --config /data/config.json
 #
-# tileserver-gl-dev/compose.s3.yml builds and runs this against a local MinIO.
+# tileserver-gl-dev/compose.s3.yml runs this image against a local MinIO; it
+# consumes the tag above rather than building it.
 
-# Base image tag, overridable: --build-arg BASE=tileserver-gl-light:5.7.0-pre.0
+# Base image tag — pass --build-arg BASE=stsdockerhub/tileserver-gl:<ver>-light
 ARG BASE=tileserver-gl-light:local
 FROM ${BASE}
 

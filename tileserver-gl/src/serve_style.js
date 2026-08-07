@@ -1,10 +1,10 @@
-'use strict';
+'use strict'
 
-import path from 'path';
+import path from 'path'
 
-import clone from 'clone';
-import express from 'express';
-import { validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
+import clone from 'clone'
+import express from 'express'
+import { validateStyleMin } from '@maplibre/maplibre-gl-style-spec'
 
 import {
   allowedSpriteFormats,
@@ -14,10 +14,10 @@ import {
   isValidHttpUrl,
   readFile,
   setCacheControl,
-} from './utils.js';
-import { gzipP } from './promises.js';
+} from './utils.js'
+import { gzipP } from './promises.js'
 
-let metricsModule = null;
+let metricsModule = null
 
 export const serve_style = {
   /**
@@ -28,27 +28,22 @@ export const serve_style = {
    * @returns {express.Application} The initialized Express application.
    */
   init: function (options, repo, programOpts) {
-    const { verbose, allowedHosts } = programOpts;
+    const { verbose, allowedHosts } = programOpts
     // Cache metrics module if enabled. Safe because tests verify before production.
     if (programOpts.metrics) {
-      import('./metrics.js')
-        .then((m) => {
-          metricsModule = m;
-        })
-        .catch((err) => {
-          console.error('Failed to import metrics module:', err);
-        });
+      import('./metrics.js').then((m) => {
+        metricsModule = m
+      }).catch((err) => {
+        console.error('Failed to import metrics module:', err)
+      })
     }
-    const app = express().disable('x-powered-by');
+    const app = express().disable('x-powered-by')
 
-    // Serving a style only rewrites a handful of URL fields; the bulk of the
-    // document (257 layers in the bundled styles) is byte-identical for every
-    // request. The finished payload is therefore memoised per distinct public
-    // URL + API key. The cache hangs off the repo entry, so a style reload —
-    // which replaces repo[id] wholesale — drops it with the old entry.
-    // Bounded because the key is caller-supplied: expiring tokens are all
-    // distinct, and an unbounded map would grow without limit.
-    const STYLE_CACHE_MAX = 32;
+    // Serving a style only rewrites a handful of URL fields; the bulk of the document is byte-identical for every request.
+    // The finished payload is therefore memoised per distinct public URL + API key.
+    // The cache hangs off the repo entry, so a style reload — which replaces repo[id] wholesale — drops it with the old entry.
+    // Bounded because the key is caller-supplied: expiring tokens are all distinct, and an unbounded map would grow without limit.
+    const STYLE_CACHE_MAX = 32
 
     /**
      * Builds the style document for a request, with the local:// URLs resolved.
@@ -62,34 +57,34 @@ export const serve_style = {
       const styleJSON_ = {
         ...item.styleJSON,
         sources: clone(item.styleJSON.sources),
-      };
+      }
       for (const name of Object.keys(styleJSON_.sources)) {
         // eslint-disable-next-line security/detect-object-injection -- name is from Object.keys of style sources
-        const source = styleJSON_.sources[name];
-        source.url = fixUrl(req, source.url, item.publicUrl, allowedHosts);
+        const source = styleJSON_.sources[name]
+        source.url = fixUrl(req, source.url, item.publicUrl, allowedHosts)
         if (typeof source.data == 'string') {
-          source.data = fixUrl(req, source.data, item.publicUrl, allowedHosts);
+          source.data = fixUrl(req, source.data, item.publicUrl, allowedHosts)
         }
       }
       if (styleJSON_.sprite) {
         if (Array.isArray(styleJSON_.sprite)) {
           // Entries get their .url reassigned, so these objects do need copying.
-          styleJSON_.sprite = clone(styleJSON_.sprite);
+          styleJSON_.sprite = clone(styleJSON_.sprite)
           styleJSON_.sprite.forEach((spriteItem) => {
             spriteItem.url = fixUrl(
               req,
               spriteItem.url,
               item.publicUrl,
               allowedHosts,
-            );
-          });
+            )
+          })
         } else {
           styleJSON_.sprite = fixUrl(
             req,
             styleJSON_.sprite,
             item.publicUrl,
             allowedHosts,
-          );
+          )
         }
       }
       if (styleJSON_.glyphs) {
@@ -98,10 +93,10 @@ export const serve_style = {
           styleJSON_.glyphs,
           item.publicUrl,
           allowedHosts,
-        );
+        )
       }
-      return styleJSON_;
-    };
+      return styleJSON_
+    }
 
     /**
      * Handles requests for style.json files.
@@ -112,64 +107,64 @@ export const serve_style = {
      * @returns {Promise<void>}
      */
     app.get('/:id/style.json', async (req, res, next) => {
-      const { id } = req.params;
+      const { id } = req.params
       if (verbose >= 1) {
         console.log(
           'Handling style request for: /styles/%s/style.json',
           String(id).replace(/\n|\r/g, ''),
-        );
+        )
       }
       try {
         // eslint-disable-next-line security/detect-object-injection -- id is route parameter from URL
-        const item = repo[id];
+        const item = repo[id]
         if (!item) {
-          return res.sendStatus(404);
+          return res.sendStatus(404)
         }
 
         // Everything that varies the output: the public URL base (derived from
         // publicUrl, or from the request host when it is not set) and the key
         // that fixUrl appends to each rewritten URL.
-        const base = getPublicUrl(item.publicUrl, req, allowedHosts);
-        const key = typeof req.query.key === 'string' ? req.query.key : '';
-        const cacheKey = `${base}\u0000${key}`;
+        const base = getPublicUrl(item.publicUrl, req, allowedHosts)
+        const key = typeof req.query.key === 'string' ? req.query.key : ''
+        const cacheKey = `${base}\u0000${key}`
 
         if (!item.styleCache) {
-          item.styleCache = new Map();
+          item.styleCache = new Map()
         }
-        let entry = item.styleCache.get(cacheKey);
+        let entry = item.styleCache.get(cacheKey)
         if (entry) {
           // Refresh recency so the eviction below drops the coldest entry.
-          item.styleCache.delete(cacheKey);
-          item.styleCache.set(cacheKey, entry);
+          item.styleCache.delete(cacheKey)
+          item.styleCache.set(cacheKey, entry)
         } else {
-          const json = Buffer.from(JSON.stringify(buildStyle(item, req)));
-          entry = { json, gzip: await gzipP(json) };
-          item.styleCache.set(cacheKey, entry);
+          const json = Buffer.from(JSON.stringify(buildStyle(item, req)))
+          entry = { json, gzip: await gzipP(json) }
+          item.styleCache.set(cacheKey, entry)
           if (item.styleCache.size > STYLE_CACHE_MAX) {
-            item.styleCache.delete(item.styleCache.keys().next().value);
+            item.styleCache.delete(item.styleCache.keys().next().value)
           }
         }
 
         if (metricsModule) {
-          metricsModule.tilesServedTotal.inc({ type: 'style', name: id });
+          metricsModule.tilesServedTotal.inc({ type: 'style', name: id })
         }
 
-        res.set('Content-Type', 'application/json; charset=utf-8');
-        setCacheControl(res, options, 'metadata');
+        res.set('Content-Type', 'application/json; charset=utf-8')
+        setCacheControl(res, options, 'metadata')
         // RFC 7231 §5.3.4: a missing Accept-Encoding means any encoding is
         // acceptable. Only an explicit header excluding gzip forces identity.
         if (
           req.headers['accept-encoding'] === undefined ||
           req.acceptsEncodings('gzip') === 'gzip'
         ) {
-          res.set('Content-Encoding', 'gzip');
-          return res.send(entry.gzip);
+          res.set('Content-Encoding', 'gzip')
+          return res.send(entry.gzip)
         }
-        return res.send(entry.json);
+        return res.send(entry.json)
       } catch (e) {
-        next(e);
+        next(e)
       }
-    });
+    })
 
     /**
      * Handles GET requests for sprite images and JSON files.
@@ -185,13 +180,13 @@ export const serve_style = {
     app.get(
       `/:id/sprite{/:spriteID}{@:scale}{.:format}`,
       async (req, res, next) => {
-        const { spriteID = 'default', id, format, scale } = req.params;
-        const sanitizedId = String(id).replace(/\n|\r/g, '');
-        const sanitizedScale = scale ? String(scale).replace(/\n|\r/g, '') : '';
-        const sanitizedSpriteID = String(spriteID).replace(/\n|\r/g, '');
+        const { spriteID = 'default', id, format, scale } = req.params
+        const sanitizedId = String(id).replace(/\n|\r/g, '')
+        const sanitizedScale = scale ? String(scale).replace(/\n|\r/g, '') : ''
+        const sanitizedSpriteID = String(spriteID).replace(/\n|\r/g, '')
         const sanitizedFormat = format
           ? '.' + String(format).replace(/\n|\r/g, '')
-          : '';
+          : ''
         if (verbose >= 1) {
           console.log(
             `Handling sprite request for: /styles/%s/sprite/%s%s%s`,
@@ -199,11 +194,11 @@ export const serve_style = {
             sanitizedSpriteID,
             sanitizedScale,
             sanitizedFormat,
-          );
+          )
         }
         // eslint-disable-next-line security/detect-object-injection -- id is route parameter from URL
-        const item = repo[id];
-        const validatedFormat = allowedSpriteFormats(format);
+        const item = repo[id]
+        const validatedFormat = allowedSpriteFormats(format)
         if (!item || !validatedFormat) {
           if (verbose >= 1)
             console.error(
@@ -212,13 +207,13 @@ export const serve_style = {
               sanitizedSpriteID,
               sanitizedScale,
               sanitizedFormat,
-            );
-          return res.sendStatus(404);
+            )
+          return res.sendStatus(404)
         }
         const sprite = item.spritePaths.find(
           (sprite) => sprite.id === spriteID,
-        );
-        const spriteScale = allowedSpriteScales(scale);
+        )
+        const spriteScale = allowedSpriteScales(scale)
         if (!sprite || spriteScale === null) {
           if (verbose >= 1)
             console.error(
@@ -227,31 +222,31 @@ export const serve_style = {
               sanitizedSpriteID,
               sanitizedScale,
               sanitizedFormat,
-            );
-          return res.status(400).send('Bad Sprite ID or Scale');
+            )
+          return res.status(400).send('Bad Sprite ID or Scale')
         }
 
-        const modifiedSince = req.get('if-modified-since');
-        const cc = req.get('cache-control');
+        const modifiedSince = req.get('if-modified-since')
+        const cc = req.get('cache-control')
         if (modifiedSince && (!cc || cc.indexOf('no-cache') === -1)) {
           if (
             new Date(item.lastModified).getTime() ===
             new Date(modifiedSince).getTime()
           ) {
-            return res.sendStatus(304);
+            return res.sendStatus(304)
           }
         }
 
-        const sanitizedSpritePath = sprite.path.replace(/^(\.\.\/)+/, '');
-        const filename = `${sanitizedSpritePath}${spriteScale}.${validatedFormat}`;
-        if (verbose >= 1) console.log(`Loading sprite from: %s`, filename);
+        const sanitizedSpritePath = sprite.path.replace(/^(\.\.\/)+/, '')
+        const filename = `${sanitizedSpritePath}${spriteScale}.${validatedFormat}`
+        if (verbose >= 1) console.log(`Loading sprite from: %s`, filename)
         try {
-          const data = await readFile(filename);
+          const data = await readFile(filename)
 
           if (validatedFormat === 'json') {
-            res.header('Content-type', 'application/json');
+            res.header('Content-type', 'application/json')
           } else if (validatedFormat === 'png') {
-            res.header('Content-type', 'image/png');
+            res.header('Content-type', 'image/png')
           }
           if (verbose >= 1)
             console.log(
@@ -260,24 +255,24 @@ export const serve_style = {
               sanitizedSpriteID,
               sanitizedScale,
               sanitizedFormat,
-            );
-          res.set({ 'Last-Modified': item.lastModified });
-          setCacheControl(res, options, 'asset');
-          return res.send(data);
+            )
+          res.set({ 'Last-Modified': item.lastModified })
+          setCacheControl(res, options, 'asset')
+          return res.send(data)
         } catch (err) {
           if (verbose >= 1) {
             console.error(
               'Sprite load error: %s, Error: %s',
               filename,
               String(err),
-            );
+            )
           }
-          return res.sendStatus(404);
+          return res.sendStatus(404)
         }
       },
-    );
+    )
 
-    return app;
+    return app
   },
   /**
    * Removes an item from the repository.
@@ -287,7 +282,7 @@ export const serve_style = {
    */
   remove: function (repo, id) {
     // eslint-disable-next-line security/detect-object-injection -- id is function parameter for removal
-    delete repo[id];
+    delete repo[id]
   },
   /**
    * Adds a new style to the repository.
@@ -311,13 +306,13 @@ export const serve_style = {
     reportTiles,
     reportFont,
   ) {
-    const { publicUrl, ignoreMissingFiles } = programOpts;
-    const styleFile = path.resolve(options.paths.styles, params.style);
-    const styleJSON = clone(style);
+    const { publicUrl, ignoreMissingFiles } = programOpts
+    const styleFile = path.resolve(options.paths.styles, params.style)
+    const styleJSON = clone(style)
 
     // Sanitize style for validation: remove non-spec properties (e.g., 'sparse')
     // so that validateStyleMin doesn't reject valid styles containing our custom flags.
-    const styleForValidation = clone(styleJSON);
+    const styleForValidation = clone(styleJSON)
     if (styleForValidation.sources) {
       for (const name of Object.keys(styleForValidation.sources)) {
         if (
@@ -330,7 +325,7 @@ export const serve_style = {
         ) {
           try {
             // eslint-disable-next-line security/detect-object-injection -- name is from Object.keys of styleForValidation.sources
-            delete styleForValidation.sources[name].sparse;
+            delete styleForValidation.sources[name].sparse
           } catch (_err) {
             // ignore any deletion errors and continue validation
           }
@@ -338,56 +333,56 @@ export const serve_style = {
       }
     }
 
-    const validationErrors = validateStyleMin(styleForValidation);
+    const validationErrors = validateStyleMin(styleForValidation)
     if (validationErrors.length > 0) {
-      console.log(`The file "${params.style}" is not a valid style file:`);
+      console.log(`The file "${params.style}" is not a valid style file:`)
       for (const err of validationErrors) {
-        console.log(`${err.line}: ${err.message}`);
+        console.log(`${err.line}: ${err.message}`)
       }
-      return false;
+      return false
     }
 
     // Track missing sources
-    const missingSources = [];
+    const missingSources = []
 
     for (const name of Object.keys(styleJSON.sources)) {
       // eslint-disable-next-line security/detect-object-injection -- name is from Object.keys of style sources
-      const source = styleJSON.sources[name];
-      let url = source.url;
+      const source = styleJSON.sources[name]
+      let url = source.url
       if (
         url &&
         (url.startsWith('pmtiles://') || url.startsWith('mbtiles://'))
       ) {
-        const protocol = url.split(':')[0];
+        const protocol = url.split(':')[0]
 
-        let dataId = url.replace('pmtiles://', '').replace('mbtiles://', '');
+        let dataId = url.replace('pmtiles://', '').replace('mbtiles://', '')
         if (dataId.startsWith('{') && dataId.endsWith('}')) {
-          dataId = dataId.slice(1, -1);
+          dataId = dataId.slice(1, -1)
         }
 
         // eslint-disable-next-line security/detect-object-injection -- dataId is from style source URL, used for mapping lookup
-        const mapsTo = (params.mapping || {})[dataId];
+        const mapsTo = (params.mapping || {})[dataId]
         if (mapsTo) {
-          dataId = mapsTo;
+          dataId = mapsTo
         }
 
-        const identifier = reportTiles(dataId, protocol);
+        const identifier = reportTiles(dataId, protocol)
         if (!identifier) {
           // This datasource is missing or invalid in some way
-          missingSources.push(name);
-          continue;
+          missingSources.push(name)
+          continue
         }
-        source.url = `local://data/${identifier}.json`;
+        source.url = `local://data/${identifier}.json`
       }
 
-      let data = source.data;
+      let data = source.data
       if (data && typeof data == 'string' && data.startsWith('file://')) {
         source.data =
           'local://files' +
           path.resolve(
             '/',
             data.replace('file://', '').replace(options.paths.files, ''),
-          );
+          )
       }
     }
 
@@ -395,65 +390,62 @@ export const serve_style = {
     if (missingSources.length > 0) {
       if (ignoreMissingFiles) {
         console.log(
-          `WARN: Style '${id}' references ${missingSources.length} missing data source(s): [${missingSources.join(', ')}] - not adding style`,
-        );
+          `WARN: Style '${id}' references ${missingSources.length} missing data source(s): [${missingSources.join(
+            ', ')}] - not adding style`,
+        )
       } else {
         console.log(
           `ERROR: Style '${id}' references missing data source(s): [${missingSources.join(', ')}]`,
-        );
+        )
       }
-      return false;
+      return false
     }
 
     for (const obj of styleJSON.layers) {
       if (obj['type'] === 'symbol') {
-        const fonts = (obj['layout'] || {})['text-font'];
+        const fonts = (obj['layout'] || {})['text-font']
         if (fonts && fonts.length) {
-          fonts.forEach(reportFont);
+          fonts.forEach(reportFont)
         } else {
-          reportFont('Open Sans Regular');
-          reportFont('Arial Unicode MS Regular');
+          reportFont('Open Sans Regular')
+          reportFont('Arial Unicode MS Regular')
         }
       }
     }
 
-    let spritePaths = [];
+    let spritePaths = []
     if (styleJSON.sprite) {
       if (!Array.isArray(styleJSON.sprite)) {
         if (!isValidHttpUrl(styleJSON.sprite)) {
           let spritePath = path.join(
             options.paths.sprites,
-            styleJSON.sprite
-              .replace('{style}', path.basename(styleFile, '.json'))
-              .replace(
-                '{styleJsonFolder}',
-                path.relative(options.paths.sprites, path.dirname(styleFile)),
-              ),
-          );
-          styleJSON.sprite = `local://styles/${id}/sprite`;
-          spritePaths.push({ id: 'default', path: spritePath });
+            styleJSON.sprite.replace('{style}', path.basename(styleFile, '.json')).replace(
+              '{styleJsonFolder}',
+              path.relative(options.paths.sprites, path.dirname(styleFile)),
+            ),
+          )
+          styleJSON.sprite = `local://styles/${id}/sprite`
+          spritePaths.push({ id: 'default', path: spritePath })
         }
       } else {
         for (let spriteItem of styleJSON.sprite) {
           if (!isValidHttpUrl(spriteItem.url)) {
             let spritePath = path.join(
               options.paths.sprites,
-              spriteItem.url
-                .replace('{style}', path.basename(styleFile, '.json'))
-                .replace(
-                  '{styleJsonFolder}',
-                  path.relative(options.paths.sprites, path.dirname(styleFile)),
-                ),
-            );
-            spriteItem.url = `local://styles/${id}/sprite/` + spriteItem.id;
-            spritePaths.push({ id: spriteItem.id, path: spritePath });
+              spriteItem.url.replace('{style}', path.basename(styleFile, '.json')).replace(
+                '{styleJsonFolder}',
+                path.relative(options.paths.sprites, path.dirname(styleFile)),
+              ),
+            )
+            spriteItem.url = `local://styles/${id}/sprite/` + spriteItem.id
+            spritePaths.push({ id: spriteItem.id, path: spritePath })
           }
         }
       }
     }
 
     if (styleJSON.glyphs && !isValidHttpUrl(styleJSON.glyphs)) {
-      styleJSON.glyphs = 'local://fonts/{fontstack}/{range}.pbf';
+      styleJSON.glyphs = 'local://fonts/{fontstack}/{range}.pbf'
     }
 
     // eslint-disable-next-line security/detect-object-injection -- id is from config file style names
@@ -463,8 +455,8 @@ export const serve_style = {
       publicUrl,
       name: styleJSON.name,
       lastModified: new Date().toUTCString(),
-    };
+    }
 
-    return true;
+    return true
   },
-};
+}

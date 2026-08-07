@@ -1,10 +1,10 @@
-'use strict';
+'use strict'
 
-import express from 'express';
+import express from 'express'
 
-import { getFontsPbf, listFonts, setCacheControl } from './utils.js';
+import { getFontsPbf, listFonts, setCacheControl } from './utils.js'
 
-let metricsModule = null;
+let metricsModule = null
 
 /**
  * Initializes and returns an Express app that serves font files.
@@ -13,20 +13,20 @@ let metricsModule = null;
  * @param {object} programOpts - An object containing the program options.
  * @returns {Promise<express.Application>} - A promise that resolves to the Express app.
  */
-export async function serve_font(options, allowedFonts, programOpts) {
-  const { verbose } = programOpts;
+export async function serve_font (options, allowedFonts, programOpts) {
+  const { verbose } = programOpts
   // Cache metrics module if enabled. Safe because tests verify before production.
   if (programOpts.metrics) {
-    const m = await import('./metrics.js');
-    metricsModule = m;
+    const m = await import('./metrics.js')
+    metricsModule = m
   }
-  const app = express().disable('x-powered-by');
+  const app = express().disable('x-powered-by')
 
-  const lastModified = new Date().toUTCString();
+  const lastModified = new Date().toUTCString()
 
-  const fontPath = options.paths.fonts;
+  const fontPath = options.paths.fonts
 
-  const existingFonts = {};
+  const existingFonts = {}
 
   /**
    * Handles requests for a font file.
@@ -37,27 +37,27 @@ export async function serve_font(options, allowedFonts, programOpts) {
    * @returns {Promise<void>}
    */
   app.get('/fonts/:fontstack/:range.pbf', async (req, res) => {
-    const sRange = String(req.params.range).replace(/\n|\r/g, '');
+    const sRange = String(req.params.range).replace(/\n|\r/g, '')
     const sFontStack = String(decodeURI(req.params.fontstack)).replace(
       /\n|\r/g,
       '',
-    );
+    )
 
     if (verbose >= 1) {
       console.log(
         `Handling font request for: /fonts/%s/%s.pbf`,
         sFontStack,
         sRange,
-      );
+      )
     }
 
-    const modifiedSince = req.get('if-modified-since');
-    const cc = req.get('cache-control');
+    const modifiedSince = req.get('if-modified-since')
+    const cc = req.get('cache-control')
     if (modifiedSince && (!cc || cc.indexOf('no-cache') === -1)) {
       if (
         new Date(lastModified).getTime() === new Date(modifiedSince).getTime()
       ) {
-        return res.sendStatus(304);
+        return res.sendStatus(304)
       }
     }
 
@@ -68,27 +68,24 @@ export async function serve_font(options, allowedFonts, programOpts) {
         sFontStack,
         sRange,
         existingFonts,
-      );
-      res.header('Content-type', 'application/x-protobuf');
-      res.header('Last-Modified', lastModified);
-      setCacheControl(res, options, 'asset');
+      )
+      res.header('Content-type', 'application/x-protobuf')
+      res.header('Last-Modified', lastModified)
+      setCacheControl(res, options, 'asset')
       if (metricsModule) {
-        metricsModule.tilesServedTotal.inc({ type: 'font', name: sFontStack });
+        metricsModule.tilesServedTotal.inc({ type: 'font', name: sFontStack })
       }
-      return res.send(concatenated);
+      return res.send(concatenated)
     } catch (err) {
       console.error(
         `Error serving font: %s/%s.pbf, Error: %s`,
         sFontStack,
         sRange,
         String(err),
-      );
-      return res
-        .status(400)
-        .header('Content-Type', 'text/plain')
-        .send('Error serving font');
+      )
+      return res.status(400).header('Content-Type', 'text/plain').send('Error serving font')
     }
-  });
+  })
 
   /**
    * Handles requests for a list of all available fonts.
@@ -98,16 +95,16 @@ export async function serve_font(options, allowedFonts, programOpts) {
    */
   app.get('/fonts.json', (req, res) => {
     if (verbose >= 1) {
-      console.log('Handling list font request for /fonts.json');
+      console.log('Handling list font request for /fonts.json')
     }
-    res.header('Content-type', 'application/json');
-    setCacheControl(res, options, 'metadata');
+    res.header('Content-type', 'application/json')
+    setCacheControl(res, options, 'metadata')
     return res.send(
       Object.keys(options.serveAllFonts ? existingFonts : allowedFonts).sort(),
-    );
-  });
+    )
+  })
 
-  const fonts = await listFonts(options.paths.fonts);
-  Object.assign(existingFonts, fonts);
-  return app;
+  const fonts = await listFonts(options.paths.fonts)
+  Object.assign(existingFonts, fonts)
+  return app
 }

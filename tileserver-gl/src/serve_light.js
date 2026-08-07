@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-'use strict';
+'use strict'
 
 export const serve_rendered = {
   init: (options, repo, programOpts) => {},
@@ -7,6 +7,6 @@ export const serve_rendered = {
   remove: (repo, id) => {},
   clear: (repo) => {},
   getBatchElevationsFromTile: (data, param, pixels) => {
-    return pixels.map(({ index }) => ({ index, elevation: null }));
+    return pixels.map(({ index }) => ({ index, elevation: null }))
   },
-};
+}

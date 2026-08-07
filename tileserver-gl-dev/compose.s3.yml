@@ -6,13 +6,19 @@
 # access key/secret authorize the reads. The container carries no tile data and
 # mounts nothing.
 #
-# 1. Build the generic light base once (no deployment-specific content):
+# 1. Obtain the stateless image once. Compose does not build it — it consumes a
+#    fixed tag, so the same artifact runs here and in production. Either pull:
 #
-#      docker build -f ../tileserver-gl/Dockerfile_light ../tileserver-gl \
-#        -t tileserver-gl-light:local
+#      docker pull stsdockerhub/tileserver-gl:<ver>-light-s3
 #
-#    (compose builds the thin s3 child below, but cannot build this base for it
-#    — depends_on orders startup, not builds.)
+#    or build the two-step chain from ../tileserver-gl (the light base carries
+#    the code, the child bakes config.json + styles + fonts on top):
+#
+#      docker build -f Dockerfile_light . \
+#        -t stsdockerhub/tileserver-gl:<ver>-light
+#      docker build -f Dockerfile_light_s3 ../tileserver-gl-data \
+#        --build-arg BASE=stsdockerhub/tileserver-gl:<ver>-light \
+#        -t stsdockerhub/tileserver-gl:<ver>-light-s3
 #
 # 2. Generate the tileset once (mbtiles -> pmtiles). The go-pmtiles image is
 #    distroless (no shell), so this is a plain `convert`, guarded by a profile
@@ -23,9 +29,9 @@
 #    It writes ./data/pmtiles/romania.pmtiles and errors if that file already
 #    exists — delete it to regenerate.
 #
-# 3. Bring the stack up (builds the s3 child image on first run):
+# 3. Bring the stack up:
 #
-#      docker compose -f compose.s3.yml up -d --build
+#      docker compose -f compose.s3.yml up -d
 #
 #      MinIO console : http://localhost:9101   (minioadmin / minioadmin)
 #      Tileserver    : http://localhost:8082
@@ -86,10 +92,7 @@ services:
   # Stateless: config/styles/fonts are baked in (see Dockerfile_light_s3); the
   # only runtime input is the S3 tile data and the credentials below. No mounts.
   tileserver-gl:
-    build:
-      context: ../tileserver-gl-data # holds config.json, styles/, fonts/
-      dockerfile: ../tileserver-gl/Dockerfile_light_s3
-    image: tileserver-gl-light:local-s3
+    image: stsdockerhub/tileserver-gl:5.7.0-pre.0-light-s3
     depends_on:
       minio-setup:
         condition: service_completed_successfully

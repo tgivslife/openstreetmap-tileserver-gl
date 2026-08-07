@@ -16,7 +16,7 @@
 services:
   tileserver-gl:
     container_name: tileserver-perf
-    image: stsdockerhub/tileserver-gl-light:5.7.0-pre.0
+    image: stsdockerhub/tileserver-gl:5.7.0-pre.0-light
     volumes:
       - "ts_data:/data"
     # --ignore-missing-files: the volume omits the 95 GB planet mbtiles, so the

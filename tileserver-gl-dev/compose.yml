@@ -1,7 +1,7 @@
 services:
   tileserver-gl:
     container_name: tileserver-gl
-    image: stsdockerhub/tileserver-gl-light:5.7.0-pre.0
+    image: stsdockerhub/tileserver-gl:5.7.0-pre.0-light
     volumes:
       - "./data:/data" # config.json + tile databases (mbtiles/pmtiles)
       # styles and fonts live in the shared assets folder, mounted into /data:
