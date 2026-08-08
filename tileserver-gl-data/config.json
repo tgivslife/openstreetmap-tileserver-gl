@@ -13,27 +13,51 @@
   "styles": {
     "osm-openmaptiles": {
       "style": "osm-openmaptiles/style.json",
-      "mapping": { "planet-planetiler": "planet-s3" }
+      "mapping": {
+        "planet-planetiler": "planet-s3"
+      }
     },
     "osm-openmaptiles-dark": {
       "style": "osm-openmaptiles-dark/style.json",
-      "mapping": { "planet-planetiler": "planet-s3" }
+      "mapping": {
+        "planet-planetiler": "planet-s3"
+      }
     },
     "streets-v2": {
       "style": "streets-v2/style.json",
-      "mapping": { "planet-planetiler": "planet-s3" }
+      "mapping": {
+        "planet-planetiler": "planet-s3"
+      }
     },
     "streets-v2-dark": {
       "style": "streets-v2-dark/style.json",
-      "mapping": { "planet-planetiler": "planet-s3" }
+      "mapping": {
+        "planet-planetiler": "planet-s3"
+      }
     },
     "basic-v2": {
       "style": "basic-v2/style.json",
-      "mapping": { "planet-planetiler": "planet-s3" }
+      "mapping": {
+        "planet-planetiler": "planet-s3"
+      }
     },
     "basic-v2-dark": {
       "style": "basic-v2-dark/style.json",
-      "mapping": { "planet-planetiler": "planet-s3" }
+      "mapping": {
+        "planet-planetiler": "planet-s3"
+      }
+    },
+    "streets-v2-survey": {
+      "style": "streets-v2-survey/style.json",
+      "mapping": {
+        "planet-planetiler": "planet-s3"
+      }
+    },
+    "streets-v2-survey-dark": {
+      "style": "streets-v2-survey-dark/style.json",
+      "mapping": {
+        "planet-planetiler": "planet-s3"
+      }
     }
   },
   "data": {
