@@ -16,6 +16,7 @@ import {
   isValidRemoteUrl,
   lonLatToTilePixel,
   setCacheControl,
+  setHostDerivedCacheControl,
 } from './utils.js'
 import { getPMtilesInfo, openPMtiles } from './pmtiles_adapter.js'
 import { gunzipP, gzipP } from './promises.js'
@@ -72,8 +73,7 @@ export const serve_data = {
      */
     app.get('/:id/:z/:x/:y.:format', async (req, res) => {
       if (verbose >= 1) {
-        console.log(
-          `Handling tile request for: /data/%s/%s/%s/%s.%s`,
+        console.log(`Handling tile request for: /data/%s/%s/%s/%s.%s`,
           String(req.params.id).replace(/\n|\r/g, ''),
           String(req.params.z).replace(/\n|\r/g, ''),
           String(req.params.x).replace(/\n|\r/g, ''),
@@ -130,16 +130,13 @@ export const serve_data = {
 
       let data = fetchTile.data
       const headers = fetchTile.headers || {}
-      // Gzip magic bytes, compared directly to avoid allocating a needle
-      // Buffer on every request.
+      // Gzip magic bytes, compared directly to avoid allocating a needle Buffer on every request.
       const isGzipped = data.length > 1 && data[0] === 0x1f && data[1] === 0x8b
 
       // Only the paths that read or rewrite the tile bytes need them decompressed.
       // Vector tiles are stored gzipped and are served gzipped, so for the common case the stored blob is handed
       // straight to the client instead of being gunzipped and re-gzipped on every request.
-      const needsRaw =
-        format === 'geojson' ||
-        (tileJSONFormat === 'pbf' && Boolean(options.dataDecoratorFunc))
+      const needsRaw = format === 'geojson' || (tileJSONFormat === 'pbf' && Boolean(options.dataDecoratorFunc))
 
       if (isGzipped && needsRaw) {
         data = await gunzipP(data)
@@ -206,6 +203,12 @@ export const serve_data = {
         delete headers['Content-Encoding']
       }
       res.set(headers)
+      // When gzip was in play — a compressible format or a stored-gzipped blob — the Content-Encoding above was chosen from Accept-Encoding,
+      // so a shared cache must key on it (RFC 9110 §12.5.5) to avoid serving a gzip body to a client that did not accept one.
+      // Already-compressed raster tiles are always identity, so they are left un-Varied to keep the cache from fragmenting.
+      if (compressible || isGzipped) {
+        res.vary('Accept-Encoding')
+      }
       setCacheControl(res, options, 'tile')
 
       if (metricsModule) {
@@ -388,8 +391,7 @@ export const serve_data = {
     app.get('/:id/elevation/:z/:x/:y', async (req, res, next) => {
       try {
         if (verbose >= 1) {
-          console.log(
-            `Handling elevation request for: /data/%s/elevation/%s/%s/%s`,
+          console.log(`Handling elevation request for: /data/%s/elevation/%s/%s/%s`,
             String(req.params.id).replace(/\n|\r/g, ''),
             String(req.params.z).replace(/\n|\r/g, ''),
             String(req.params.x).replace(/\n|\r/g, ''),
@@ -463,7 +465,12 @@ export const serve_data = {
           pixelY,
         })
       } catch (err) {
-        return res.status(500).header('Content-Type', 'text/plain').send(err.message)
+        // Log the detail server-side; the message can carry filesystem paths or S3 bucket/key names, so return only a generic reason to the client.
+        console.error('Elevation request failed:', err && err.stack ? err.stack : err,)
+        return res
+          .status(500)
+          .header('Content-Type', 'text/plain')
+          .send('Elevation request failed')
       }
     })
 
@@ -498,7 +505,12 @@ export const serve_data = {
         const results = await getBatchElevations(sourceInfo, points)
         res.status(200).json(results)
       } catch (err) {
-        return res.status(500).header('Content-Type', 'text/plain').send(err.message)
+        // Log the detail server-side; the message can carry filesystem paths or S3 bucket/key names, so return only a generic reason to the client.
+        console.error('Elevation request failed:', err && err.stack ? err.stack : err,)
+        return res
+          .status(500)
+          .header('Content-Type', 'text/plain')
+          .send('Elevation request failed')
       }
     })
 
@@ -511,8 +523,7 @@ export const serve_data = {
      */
     app.get('/:id.json', (req, res) => {
       if (verbose >= 1) {
-        console.log(
-          `Handling tilejson request for: /data/%s.json`,
+        console.log(`Handling tilejson request for: /data/%s.json`,
           String(req.params.id).replace(/\n|\r/g, ''),
         )
       }
@@ -535,7 +546,10 @@ export const serve_data = {
         },
         allowedHosts,
       )
-      setCacheControl(res, options, 'metadata')
+      setHostDerivedCacheControl(res, options, 'metadata', {
+        publicUrl: item.publicUrl,
+        allowedHosts,
+      })
       return res.send(info)
     })
 
@@ -568,9 +582,7 @@ export const serve_data = {
       inputType = 'mbtiles'
       // MBTiles does not support remote URLs
       if (isValidRemoteUrl(params.mbtiles)) {
-        console.log(
-          `ERROR: MBTiles does not support remote files. "${params.mbtiles}" is not a valid data file.`,
-        )
+        console.log(`ERROR: MBTiles does not support remote files. "${params.mbtiles}" is not a valid data file.`,)
         process.exit(1)
       } else {
         inputFile = path.resolve(options.paths.mbtiles, params.mbtiles)
@@ -594,9 +606,7 @@ export const serve_data = {
         }
       } catch (_err) {
         if (ignoreMissingFiles) {
-          console.log(
-            `WARN: Data source '${id}' file not found: "${inputFile}" - skipping`,
-          )
+          console.log(`WARN: Data source '${id}' file not found: "${inputFile}" - skipping`,)
           return
         }
         throw Error(`Not valid input file: "${inputFile}"`, { cause: _err })
@@ -632,9 +642,7 @@ export const serve_data = {
       }
     } catch (err) {
       if (ignoreMissingFiles) {
-        console.log(
-          `WARN: Unable to open data source '${id}' from "${inputFile}": ${err.message} - skipping (requests will return 404)`,
-        )
+        console.log(`WARN: Unable to open data source '${id}' from "${inputFile}": ${err.message} - skipping (requests will return 404)`,)
         return
       }
       throw err

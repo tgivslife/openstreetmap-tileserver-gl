@@ -1,15 +1,11 @@
 # Stateless S3/PMTiles deployment image.
 #
-# The generic light image (Dockerfile_light) plus this deployment's small,
-# static assets — config.json, styles, fonts — baked into /data, so the only
-# thing the container fetches at runtime is tile *data*, from S3 / an
-# S3-compatible store. No volume, no bind mount: the pod carries its map assets
-# and is fully stateless. Tile databases (mbtiles/pmtiles) are never baked in.
+# The generic light image (Dockerfile_light) plus this deployment's small, static assets — config.json, styles,
+# fonts — baked into /data, so the only thing the container fetches at runtime is tile *data*, from S3 / an S3-compatible store.
+# No volume, no bind mount: the pod carries its map assets and is fully stateless. Tile databases (mbtiles/pmtiles) are never baked in.
 #
-# This is a thin child of the light image; the base carries all the code and
-# dependencies (including @aws-sdk/client-s3 and pmtiles). The build context is
-# the assets folder ../tileserver-gl-data, NOT this repo — that is where
-# config.json, styles/ and fonts/ live.
+# This is a thin child of the light image; the base carries all the code and dependencies (including @aws-sdk/client-s3 and pmtiles).
+# The build context is the assets folder ../tileserver-gl-data, NOT this repo — that is where config.json, styles/ and fonts/ live.
 #
 # Two-step build (the base has no deployment-specific content, build it once).
 # Pass BASE explicitly — no build in this repo produces the default tag below:
@@ -20,24 +16,28 @@
 #     --build-arg BASE=stsdockerhub/tileserver-gl:<ver>-light \
 #     -t stsdockerhub/tileserver-gl:<ver>-light-s3
 #
-# Run (credentials via the standard AWS chain — env vars here; the baked
-# config.json points at the bucket):
+# Run (credentials via the standard AWS chain — env vars here; the baked config.json points at the bucket).
+# The image's CMD already runs `--config /data/config.json --silent --log_format ...`, so no args are needed;
+# pass your own command only to replace those defaults:
 #
 #   docker run --rm -p 8080:8080 \
 #     -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
-#     stsdockerhub/tileserver-gl:<ver>-light-s3 --config /data/config.json
+#     stsdockerhub/tileserver-gl:<ver>-light-s3
 #
-# tileserver-gl-dev/compose.s3.yml runs this image against a local MinIO; it
-# consumes the tag above rather than building it.
+# tileserver-gl-dev/compose.s3.yml runs this image against a local MinIO; it consumes the tag above rather than building it.
 
 # Base image tag — pass --build-arg BASE=stsdockerhub/tileserver-gl:<ver>-light
 ARG BASE=tileserver-gl-light:local
 FROM ${BASE}
 
-# Baked assets, owned by the runtime user. Fonts dominate the size (~120 MB for
-# the full Noto + Open Sans set); in production bake only the fonts your styles
-# reference to keep the image small. There is no VOLUME on /data in the base, so
-# these files are served as-is instead of being shadowed by an empty volume.
+# Baked assets, owned by the runtime user. Fonts dominate the size (~120 MB for the full Noto + Open Sans set);
+# in production bake only the fonts your styles reference to keep the image small.
+# There is no VOLUME on /data in the base, so these files are served as-is instead of being shadowed by an empty volume.
 COPY --chown=node:node config.json /data/config.json
 COPY --chown=node:node styles      /data/styles
 COPY --chown=node:node fonts       /data/fonts
+
+# Default run args, baked in so the stateless image is self-contained: point at the baked config, stay quiet on successful requests
+# (--silent skips logging 200/304), and use an ISO-timestamped access-log line.
+# The :url token is key-redacted in server.js. Passing your own command/args at `docker run` compose `command:` replaces this whole default.
+CMD ["--config", "/data/config.json", "--silent", "--log_format", ":date[iso] :method :url :status :res[content-length] - :response-time ms"]

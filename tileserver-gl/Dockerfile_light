@@ -1,36 +1,30 @@
 # Vector-tiles-only ("light") build of tileserver-gl.
 #
-# Serves vector tiles, styles, fonts, sprites and the viewer, but does no
-# server-side rasterization: no /styles/<id>/<z>/<x>/<y>.png, no /static/
-# endpoints, no elevation queries. Light mode is selected by the package
-# name ending in `-light` (see src/server.js), which swaps serve_rendered.js
+# Serves vector tiles, styles, fonts, sprites and the viewer, but does no server-side rasterization:
+# no /styles/<id>/<z>/<x>/<y>.png, no /static/ endpoints, no elevation queries.
+# Light mode is selected by the package name ending in `-light` (see src/server.js), which swaps serve_rendered.js
 # for the no-op stubs in src/serve_light.js.
 #
-# Dropping the renderer removes maplibre-gl-native, canvas and sharp, and
-# with them the whole GL stack (mesa + LLVM software rasterizer, GLFW, Xvfb)
-# and the cairo/pango/rsvg image stack.
+# Dropping the renderer removes maplibre-gl-native, canvas and sharp, and with them the whole GL stack
+# (mesa + LLVM software rasterizer, GLFW, Xvfb) and the cairo/pango/rsvg image stack.
 #
 # Data source is orthogonal to the image. The same build serves either:
-#   * local files under /data (a bind mount in dev, or baked into a child
-#     image) — the traditional layout; or
-#   * remote PMTiles on S3 / any S3-compatible store (MinIO, R2, …) or plain
-#     HTTP, by pointing a config.json data source at an s3://, s3+https://,
-#     s3+http:// or https:// URL. The @aws-sdk/client-s3 and pmtiles packages
-#     that make this work already ship here; nothing extra is installed.
-#     Credentials come from the standard AWS chain (AWS_ACCESS_KEY_ID /
-#     AWS_SECRET_ACCESS_KEY env vars, a mounted ~/.aws profile via s3Profile,
-#     or an IAM role) — never from config.json. See tileserver-gl-dev/
-#     compose.s3.yml for a private-bucket MinIO example.
+#   * local files under /data (a bind mount in dev, or baked into a child image) — the traditional layout; or
+#   * remote PMTiles on S3 / any S3-compatible store (MinIO, R2, …) or plain HTTP, by pointing a config.json data source
+#     at an s3://, s3+https://, s3+http:// or https:// URL.
+#     The @aws-sdk/client-s3 and pmtiles packages that make this work already ship here; nothing extra is installed.
+#     Credentials come from the standard AWS chain (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars, a mounted ~/.aws
+#     profile via s3Profile, or an IAM role) — never from config.json.
+#     See tileserver-gl-dev/compose.s3.yml for a private-bucket MinIO example.
 #
-#   docker build -f Dockerfile_light . -t tileserver-gl-light
+#   docker build -f Dockerfile_light . -t tileserver-gl:<ver>-light
 
 FROM ubuntu:noble AS builder
 
 ENV NODE_ENV="production"
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Only sqlite3 still compiles here, and only if no prebuilt binary matches
-# the target platform. The toolchain never reaches the final stage.
+# Only sqlite3 still compiles here, and only if no prebuilt binary matches the target platform. The toolchain never reaches the final stage.
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update && \
     apt-get install -y --no-install-recommends --no-install-suggests \
@@ -55,10 +49,9 @@ WORKDIR /usr/src/app
 
 COPY package.json package-lock.json ./
 
-# Drop the renderer-only dependencies before installing. This is why the
-# install below is `npm install` and not `npm ci`: package.json no longer
-# matches the lockfile. Versions of everything that remains still come from
-# package-lock.json.
+# Drop the renderer-only dependencies before installing.
+# This is why the install below is `npm install` and not `npm ci`: package.json no longer matches the lockfile.
+# Versions of everything that remains still come from package-lock.json.
 RUN node -e ' \
       const fs = require("fs"); \
       const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); \
@@ -74,9 +67,7 @@ RUN npm config set fetch-retries 5 && \
     npm install --omit=dev --no-audit --no-fund && \
     chown -R root:root /usr/src/app
 
-# The browser bundles were already copied into public/resources by the
-# `prepare` lifecycle script above, and the gyp toolchain is never used
-# again once sqlite3 is built.
+# The browser bundles were already copied into public/resources by the `prepare` lifecycle script above, and the gyp toolchain is never used again once sqlite3 is built.
 RUN rm -rf \
       node_modules/maplibre-gl \
       node_modules/leaflet \
@@ -93,9 +84,8 @@ FROM ubuntu:noble AS final
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# node bundles its own ICU and libuv, so the runtime needs nothing beyond a
-# CA bundle and jemalloc. Every other library the full image installs is
-# there for the renderer.
+# node bundles its own ICU and libuv, so the runtime needs nothing beyond a CA bundle and jemalloc.
+# Every other library the full image installs is there for the renderer.
 RUN export DEBIAN_FRONTEND=noninteractive && \
     groupadd -r node && \
     useradd -r -g node node && \
@@ -115,8 +105,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get -y remove curl gnupg && \
     apt-get -y --purge autoremove && \
     apt-get clean && \
-    # The runtime only ever executes `node`. The nodejs package also ships
-    # addon headers, npm and corepack, none of which are used here.
+    # The runtime only ever executes `node`. The nodejs package also ships addon headers, npm and corepack, none of which are used here.
     rm -rf \
       /usr/include/node \
       /usr/lib/node_modules \
@@ -138,28 +127,22 @@ ENV \
 COPY --from=builder /usr/src/app /usr/src/app
 COPY . /usr/src/app
 
-# `COPY . ` restored the original package.json, so re-apply the light
-# manifest here: the `-light` name suffix is what makes src/server.js and
-# src/serve_data.js load serve_light.js instead of serve_rendered.js.
+# `COPY . ` restored the original package.json, so re-apply the light manifest here: the `-light` name suffix is what
+# makes src/server.js and src/serve_data.js load serve_light.js instead of serve_rendered.js.
 RUN node -e ' \
       const fs = require("fs"); \
       const pkg = JSON.parse(fs.readFileSync("/usr/src/app/package.json", "utf8")); \
       pkg.name = "tileserver-gl-light"; \
       for (const dep of ["canvas", "@maplibre/maplibre-gl-native", "sharp"]) { \
         delete pkg.dependencies[dep]; \
-        delete pkg.allowScripts[dep + "@" + "*"]; \
-      } \
-      for (const key of Object.keys(pkg.allowScripts)) { \
-        if (/^(canvas|@maplibre\/maplibre-gl-native)@/.test(key)) delete pkg.allowScripts[key]; \
       } \
       fs.writeFileSync("/usr/src/app/package.json", JSON.stringify(pkg, null, 2) + "\n"); \
     ' && \
     rm -rf /usr/src/app/src/serve_rendered.js /usr/src/app/src/render.js
 
-# No VOLUME on /data. A tile server never writes there, so an anonymous volume
-# buys nothing — and it actively hurts the two ways /data is populated: it masks
-# assets baked into a child image (see Dockerfile_light_s3) by seeding a separate
-# stateful volume, and it leaves a stray volume behind on stateless deployments.
+# No VOLUME on /data. A tile server never writes there, so an anonymous volume buys nothing,
+# and it actively hurts the two ways /data is populated: it masks assets baked into a child image (see Dockerfile_light_s3)
+# by seeding a separate stateful volume, and it leaves a stray volume behind on stateless deployments.
 # A bind mount (dev) or a child image's baked files serve /data directly.
 RUN mkdir -p /data && chown node:node /data
 WORKDIR /data
@@ -170,4 +153,7 @@ USER node:node
 
 ENTRYPOINT ["/usr/src/app/docker-entrypoint.sh"]
 
-HEALTHCHECK CMD node /usr/src/app/src/healthcheck.js
+# start-period gives slow first boots (large datasets) a grace window where a failing probe keeps the container "starting"
+# rather than flipping it to "unhealthy"; a success during it marks healthy immediately.
+HEALTHCHECK --start-period=60s --interval=30s --timeout=5s --retries=3 \
+  CMD node /usr/src/app/src/healthcheck.js

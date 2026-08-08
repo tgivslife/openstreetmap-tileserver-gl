@@ -25,6 +25,7 @@ import {
   isValidHttpUrl,
   isValidRemoteUrl,
   setCacheControl,
+  setHostDerivedCacheControl,
 } from './utils.js'
 
 import { fileURLToPath } from 'url'
@@ -70,45 +71,43 @@ async function start (opts) {
     }
   }
 
-  // Prometheus HTTP metrics middleware (only register if metrics enabled)
-  if (opts.metrics) {
+  // Prometheus HTTP metrics middleware. Gated on metricsModule too: if the import above failed, registering it would deref null on every request.
+  if (opts.metrics && metricsModule) {
     app.use((req, res, next) => {
       const start = process.hrtime.bigint()
       res.on('finish', () => {
         const route = req.route?.path ?? '<unknown>'
         const durationSec = Number(process.hrtime.bigint() - start) / 1e9
-        metricsModule.httpRequestsTotal.inc({
+        metricsModule.httpRequestsTotal.inc({ method: req.method, route, status_code: String(res.statusCode), })
+        metricsModule.httpRequestDuration.observe({
           method: req.method,
           route,
-          status_code: String(res.statusCode),
-        })
-        metricsModule.httpRequestDuration.observe(
-          { method: req.method, route, status_code: String(res.statusCode) },
-          durationSec,
-        )
+          status_code: String(res.statusCode)
+        }, durationSec,)
       })
       next()
     })
   }
 
+  // Captured so reload() can close it; otherwise each restart opens a new file descriptor for --log_file and leaks the previous one.
+  let accessLogStream = null
   if (process.env.NODE_ENV !== 'test') {
-    // Redact ?key= / &key= from the logged URL so API keys and tokens, which
-    // travel in the query string, are not written to the access log. Overriding
-    // the built-in :url token covers every format (tiny/dev/combined/custom).
+    // Redact ?key= / &key= from the logged URL so API keys and tokens, which travel in the query string, are not written to the access log.
+    // Overriding the built-in :url token covers every format (tiny/dev/combined/custom).
     morgan.token('url', (req) =>
       (req.originalUrl || req.url).replace(
         /([?&]key=)[^&]*/gi,
         '$1[REDACTED]',
       ),
     )
-    const defaultLogFormat =
-      process.env.NODE_ENV === 'production' ? 'tiny' : 'dev'
+    const defaultLogFormat = process.env.NODE_ENV === 'production' ? 'tiny' : 'dev'
     const logFormat = opts.logFormat || defaultLogFormat
+    if (opts.logFile) {
+      accessLogStream = fs.createWriteStream(opts.logFile, { flags: 'a' })
+    }
     app.use(
       morgan(logFormat, {
-        stream: opts.logFile
-          ? fs.createWriteStream(opts.logFile, { flags: 'a' })
-          : process.stdout,
+        stream: accessLogStream || process.stdout,
         skip: (req, res) =>
           opts.silent && (res.statusCode === 200 || res.statusCode === 304),
       }),
@@ -118,15 +117,9 @@ async function start (opts) {
   // Optional API-key / TTL-token gate, enabled by env; off (no middleware) when unset. See docs/2.USAGE.md for the env vars and token format.
   const apiKeys = (process.env.TILESERVER_GL_API_KEYS || '').split(',').map((k) => k.trim()).filter(Boolean)
   const tokenSecret = process.env.TILESERVER_GL_TOKEN_SECRET || ''
-  const parsedMaxTtl = parseInt(
-    process.env.TILESERVER_GL_TOKEN_MAX_TTL || '',
-    10,
-  )
-  const tokenMaxTtl =
-    Number.isFinite(parsedMaxTtl) && parsedMaxTtl > 0 ? parsedMaxTtl : 604800 // 7d
-  const allowedOrigins = (process.env.TILESERVER_GL_ALLOWED_ORIGINS || '').split(',').
-    map((o) => o.trim().replace(/\/$/, '')).
-    filter(Boolean)
+  const parsedMaxTtl = parseInt(process.env.TILESERVER_GL_TOKEN_MAX_TTL || '', 10,)
+  const tokenMaxTtl = Number.isFinite(parsedMaxTtl) && parsedMaxTtl > 0 ? parsedMaxTtl : 604800 // 7d
+  const allowedOrigins = (process.env.TILESERVER_GL_ALLOWED_ORIGINS || '').split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean)
 
   // Mounted before the auth gate so 403s still carry CORS headers (browser can read the status) and keyless OPTIONS preflights are answered here.
   // An Origin allowlist reflects only those origins instead of the default *.
@@ -186,8 +179,7 @@ async function start (opts) {
       // Infinity, which would otherwise never look expired (permanent token).
       const nowSec = Date.now() / 1000
       const expirySec = Number(expiry)
-      if (
-        !Number.isFinite(expirySec) ||
+      if (!Number.isFinite(expirySec) ||
         expirySec < nowSec ||
         expirySec > nowSec + tokenMaxTtl
       ) {
@@ -205,16 +197,14 @@ async function start (opts) {
         return next()
       }
       const candidate = typeof req.query.key === 'string' ? req.query.key : ''
-      const keyOk =
-        (candidate !== '' && apiKeys.some((k) => equal(k, candidate))) ||
+      const keyOk = (candidate !== '' && apiKeys.some((k) => equal(k, candidate))) ||
         (tokenSecret !== '' && candidate !== '' && isValidToken(candidate))
       if (!keyOk) {
         return res.status(403).send('Forbidden')
       }
       if (allowedOrigins.length) {
-        // Hotlink deterrence (not auth). Use the unforgeable Origin, falling back to the Referer's origin since
-        // resource loads (<img>, CSS url()) send only Referer. Neither header = non-browser client, passes on the
-        // key; a page with Referrer-Policy: no-referrer also sends neither.
+        // Hotlink deterrence (not auth). Use the unforgeable Origin, falling back to the Referer's origin since resource loads (<img>, CSS url()) send only Referer.
+        // Neither header = non-browser client, passes on the key; a page with Referrer-Policy: no-referrer also sends neither.
         const originHeader = req.get('Origin')
         let claimed = null
         if (originHeader) {
@@ -244,27 +234,27 @@ async function start (opts) {
     })
   }
 
-  // Expand ${VAR} / ${VAR:-default} from the environment in every string value,
-  // so a baked or committed config.json can point at per-deployment values
-  // (e.g. an S3 URL or region) without editing the file. `:-` falls back when a
-  // variable is unset or empty (like the shell); an unset ${VAR} with no default
-  // is left as-is so the resulting error names the missing variable.
+  // Expand ${VAR} / ${VAR:-default} from the environment in every string value, so a baked or committed config.json can point at per-deployment values
+  // (e.g. an S3 URL or region) without editing the file. `:-` falls back when a variable is unset or empty (like the shell);
+  // an unset ${VAR} with no default is left as-is so the resulting error names the missing variable.
   const interpolateEnv = (value) => {
     if (typeof value === 'string') {
       return value.replace(
         /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g,
         (match, name, fallback) => {
           const v = process.env[name]
-          if (v !== undefined && v !== '') return v
+          if (v !== undefined && v !== '') {
+            return v
+          }
           return fallback !== undefined ? fallback : match
         },
       )
     }
-    if (Array.isArray(value)) return value.map(interpolateEnv)
+    if (Array.isArray(value)) {
+      return value.map(interpolateEnv)
+    }
     if (value && typeof value === 'object') {
-      return Object.fromEntries(
-        Object.entries(value).map(([k, v]) => [k, interpolateEnv(v)]),
-      )
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, interpolateEnv(v)]),)
     }
     return value
   }
@@ -289,31 +279,22 @@ async function start (opts) {
   const options = config.options || {}
   const paths = options.paths || {}
   options.paths = paths
-  paths.root = path.resolve(
-    configPath ? path.dirname(configPath) : process.cwd(),
-    paths.root || '',
-  )
+  paths.root = path.resolve(configPath ? path.dirname(configPath) : process.cwd(), paths.root || '',)
   paths.styles = path.resolve(paths.root, paths.styles || '')
   paths.fonts = path.resolve(paths.root, paths.fonts || '')
   paths.sprites = path.resolve(paths.root, paths.sprites || '')
   paths.mbtiles = path.resolve(paths.root, paths.mbtiles || '')
   paths.pmtiles = path.resolve(paths.root, paths.pmtiles || '')
-  paths.icons = paths.icons
-    ? path.resolve(paths.root, paths.icons)
-    : path.resolve(__dirname, '../public/resources/images')
-  paths.files = paths.files
-    ? path.resolve(paths.root, paths.files)
-    : path.resolve(__dirname, '../public/files')
+  paths.icons = paths.icons ? path.resolve(paths.root, paths.icons) : path.resolve(__dirname, '../public/resources/images')
+  paths.files = paths.files ? path.resolve(paths.root, paths.files) : path.resolve(__dirname, '../public/files')
 
   const startupPromises = []
 
   for (const type of Object.keys(paths)) {
     // eslint-disable-next-line security/detect-object-injection -- paths[type] constructed from validated config paths
     if (!fs.existsSync(paths[type])) {
-      console.error(
-        // eslint-disable-next-line security/detect-object-injection -- type is from Object.keys of paths config
-        `The specified path for "${type}" does not exist (${paths[type]}).`,
-      )
+      // eslint-disable-next-line security/detect-object-injection -- type is from Object.keys of paths config
+      console.error(`The specified path for "${type}" does not exist (${paths[type]}).`,)
       process.exit(1)
     }
   }
@@ -336,9 +317,7 @@ async function start (opts) {
     const files = await Promise.all(
       dirEntries.map((dirEntry) => {
         const entryPath = path.resolve(directory, dirEntry.name)
-        return dirEntry.isDirectory()
-          ? getFiles(entryPath)
-          : entryPath.replace(paths.icons + path.sep, '')
+        return dirEntry.isDirectory() ? getFiles(entryPath) : entryPath.replace(paths.icons + path.sep, '')
       }),
     )
 
@@ -381,9 +360,7 @@ async function start (opts) {
   app.use('/styles/', serve_style.init(options, serving.styles, opts))
   if (!isLight) {
     startupPromises.push(
-      serve_rendered.init(options, serving.rendered, opts).then((sub) => {
-        app.use('/styles/', sub)
-      }),
+      serve_rendered.init(options, serving.rendered, opts).then((sub) => {app.use('/styles/', sub)}),
     )
   }
 
@@ -483,18 +460,14 @@ async function start (opts) {
             return dataItemId
           } else {
             if (!allowMoreData) {
-              console.log(
-                `ERROR: style "${item.style}" using unknown file "${styleSourceId}"! Skipping...`,
-              )
+              console.log(`ERROR: style "${item.style}" using unknown file "${styleSourceId}"! Skipping...`,)
               return undefined
             } else {
               let id =
-                styleSourceId.substr(0, styleSourceId.lastIndexOf('.')) ||
-                styleSourceId
+                styleSourceId.substr(0, styleSourceId.lastIndexOf('.')) || styleSourceId
               // PMTiles can be remote URLs (HTTP or S3), generate unique ID for remote sources
               if (isValidRemoteUrl(styleSourceId)) {
-                id =
-                  fnv1a(styleSourceId) + '_' + id.replace(/^.*\/(.*)$/, '$1')
+                id = fnv1a(styleSourceId) + '_' + id.replace(/^.*\/(.*)$/, '$1')
               } else {
                 try {
                   const stats = fs.statSync(styleSourceId)
@@ -512,12 +485,13 @@ async function start (opts) {
                 }
               }
               // eslint-disable-next-line security/detect-object-injection -- id is being checked for existence before modification
-              while (data[id]) id += '_' //if the data source id already exists, add a "_" untill it doesn't
-              //Add the new data source to the data array.
-              // eslint-disable-next-line security/detect-object-injection -- id is constructed above to be unique
-              data[id] = {
-                [protocol]: styleSourceId,
+              while (data[id]) {
+                // if the data source id already exists, add a "_" untill it doesn't
+                id += '_'
               }
+              // Add the new data source to the data array.
+              // eslint-disable-next-line security/detect-object-injection -- id is constructed above to be unique
+              data[id] = { [protocol]: styleSourceId, }
 
               return id
             }
@@ -533,158 +507,140 @@ async function start (opts) {
     }
     if (success && item.serve_rendered !== false) {
       if (!isLight) {
-        startupPromises.push(
-          serve_rendered.add(
-            options,
-            serving.rendered,
-            item,
-            id,
-            opts,
-            styleJSON,
-            function dataResolver (styleSourceId) {
-              let resolvedFileType
-              let resolvedInputFile
-              let resolvedS3Profile
-              let resolvedRequestPayer
-              let resolvedS3Region
-              let resolvedS3UrlFormat
-              let resolvedSparse
+        await serve_rendered.add(
+          options,
+          serving.rendered,
+          item,
+          id,
+          opts,
+          styleJSON,
+          function dataResolver (styleSourceId) {
+            let resolvedFileType
+            let resolvedInputFile
+            let resolvedS3Profile
+            let resolvedRequestPayer
+            let resolvedS3Region
+            let resolvedS3UrlFormat
+            let resolvedSparse
 
-              // Debug logging to see what we're trying to match
-              if (opts.verbose >= 3) {
-                console.log(
-                  `[dataResolver] Looking for styleSourceId: ${styleSourceId}`,
-                )
-                console.log(
-                  `[dataResolver] Available data keys: ${Object.keys(data).join(', ')}`,
-                )
+            // Debug logging to see what we're trying to match
+            if (opts.verbose >= 3) {
+              console.log(`[dataResolver] Looking for styleSourceId: ${styleSourceId}`,)
+              console.log(`[dataResolver] Available data keys: ${Object.keys(data).join(', ')}`,)
+            }
+
+            for (const id of Object.keys(data)) {
+              // eslint-disable-next-line security/detect-object-injection -- id is from Object.keys of data config
+              const sourceData = data[id]
+              let currentFileType
+              let currentInputFileValue
+
+              // Check for recognized file type keys
+              if (Object.hasOwn(sourceData, 'pmtiles')) {
+                currentFileType = 'pmtiles'
+                currentInputFileValue = sourceData.pmtiles
+              } else if (Object.hasOwn(sourceData, 'mbtiles')) {
+                currentFileType = 'mbtiles'
+                currentInputFileValue = sourceData.mbtiles
               }
 
-              for (const id of Object.keys(data)) {
-                // eslint-disable-next-line security/detect-object-injection -- id is from Object.keys of data config
-                const sourceData = data[id]
-                let currentFileType
-                let currentInputFileValue
-
-                // Check for recognized file type keys
-                if (Object.hasOwn(sourceData, 'pmtiles')) {
-                  currentFileType = 'pmtiles'
-                  currentInputFileValue = sourceData.pmtiles
-                } else if (Object.hasOwn(sourceData, 'mbtiles')) {
-                  currentFileType = 'mbtiles'
-                  currentInputFileValue = sourceData.mbtiles
+              if (currentFileType && currentInputFileValue) {
+                // Debug logging
+                if (opts.verbose >= 3) {
+                  console.log(`[dataResolver] Checking id="${id}", file="${currentInputFileValue}"`,)
                 }
 
-                if (currentFileType && currentInputFileValue) {
-                  // Debug logging
-                  if (opts.verbose >= 3) {
-                    console.log(
-                      `[dataResolver] Checking id="${id}", file="${currentInputFileValue}"`,
-                    )
+                // Check if this source matches the styleSourceId
+                // Match by ID, by file path, or by base filename
+                const matchById = styleSourceId === id
+                const matchByFile = styleSourceId === currentInputFileValue
+                const matchByBasename = styleSourceId.includes(currentInputFileValue) || currentInputFileValue.includes(styleSourceId)
+
+                if (matchById || matchByFile || matchByBasename) {
+                  if (opts.verbose >= 2) {
+                    console.log(`[dataResolver] Match found for styleSourceId: ${styleSourceId}. (byId=${matchById}, byFile=${matchByFile}, byBasename=${matchByBasename})`,)
                   }
 
-                  // Check if this source matches the styleSourceId
-                  // Match by ID, by file path, or by base filename
-                  const matchById = styleSourceId === id
-                  const matchByFile = styleSourceId === currentInputFileValue
-                  const matchByBasename =
-                    styleSourceId.includes(currentInputFileValue) ||
-                    currentInputFileValue.includes(styleSourceId)
+                  resolvedFileType = currentFileType
+                  resolvedInputFile = currentInputFileValue
 
-                  if (matchById || matchByFile || matchByBasename) {
-                    if (opts.verbose >= 2) {
-                      console.log(
-                        `[dataResolver] Match found for styleSourceId: ${styleSourceId}. (byId=${matchById}, byFile=${matchByFile}, byBasename=${matchByBasename})`,
-                      )
-                    }
-
-                    resolvedFileType = currentFileType
-                    resolvedInputFile = currentInputFileValue
-
-                    // Get s3Profile if present
-                    if (Object.hasOwn(sourceData, 's3Profile')) {
-                      resolvedS3Profile = sourceData.s3Profile
-                    }
-
-                    // Get s3UrlFormat if present
-                    if (Object.hasOwn(sourceData, 's3UrlFormat')) {
-                      resolvedS3UrlFormat = sourceData.s3UrlFormat
-                    }
-
-                    // Get requestPayer if present
-                    if (Object.hasOwn(sourceData, 'requestPayer')) {
-                      resolvedRequestPayer = !!sourceData.requestPayer
-                    }
-
-                    // Get s3Region if present
-                    if (Object.hasOwn(sourceData, 's3Region')) {
-                      resolvedS3Region = sourceData.s3Region
-                    }
-
-                    // Get sparse: per-source overrides global, default to true
-                    resolvedSparse =
-                      sourceData.sparse ?? options.sparse ?? true
-
-                    break // Found our match, exit the outer loop
+                  // Get s3Profile if present
+                  if (Object.hasOwn(sourceData, 's3Profile')) {
+                    resolvedS3Profile = sourceData.s3Profile
                   }
+
+                  // Get s3UrlFormat if present
+                  if (Object.hasOwn(sourceData, 's3UrlFormat')) {
+                    resolvedS3UrlFormat = sourceData.s3UrlFormat
+                  }
+
+                  // Get requestPayer if present
+                  if (Object.hasOwn(sourceData, 'requestPayer')) {
+                    resolvedRequestPayer = !!sourceData.requestPayer
+                  }
+
+                  // Get s3Region if present
+                  if (Object.hasOwn(sourceData, 's3Region')) {
+                    resolvedS3Region = sourceData.s3Region
+                  }
+
+                  // Get sparse: per-source overrides global, default to true
+                  resolvedSparse = sourceData.sparse ?? options.sparse ?? true
+
+                  break // Found our match, exit the outer loop
                 }
               }
+            }
 
-              // If no match was found
-              if (!resolvedInputFile || !resolvedFileType) {
-                console.warn(
-                  `Data source not found for styleSourceId: ${styleSourceId}`,
-                )
-                console.warn(
-                  `Available data sources: ${Object.keys(data).map((id) => {
-                    // eslint-disable-next-line security/detect-object-injection
-                    const src = data[id]
-                    return `${id} -> ${src.pmtiles || src.mbtiles || 'unknown'}`
-                  }).join(', ')}`,
-                )
-                return {
-                  inputFile: undefined,
-                  fileType: undefined,
-                  s3Profile: undefined,
-                  requestPayer: false,
-                  s3Region: undefined,
-                  s3UrlFormat: undefined,
-                  sparse: true,
-                }
-              }
-
-              // PMTiles supports remote URLs (HTTP and S3), skip path resolution for those
-              if (!isValidRemoteUrl(resolvedInputFile)) {
-                // Ensure options.paths and options.paths[resolvedFileType] exist before trying to use them
-                if (
-                  options &&
-                  options.paths &&
-                  // eslint-disable-next-line security/detect-object-injection -- resolvedFileType is either 'pmtiles' or 'mbtiles'
-                  options.paths[resolvedFileType]
-                ) {
-                  resolvedInputFile = path.resolve(
-                    // eslint-disable-next-line security/detect-object-injection -- resolvedFileType is either 'pmtiles' or 'mbtiles'
-                    options.paths[resolvedFileType],
-                    resolvedInputFile,
-                  )
-                } else {
-                  console.warn(
-                    `Path configuration missing for fileType: ${resolvedFileType}. Using relative path for: ${resolvedInputFile}`,
-                  )
-                }
-              }
-
+            // If no match was found
+            if (!resolvedInputFile || !resolvedFileType) {
+              console.warn(`Data source not found for styleSourceId: ${styleSourceId}`,)
+              console.warn(`Available data sources: ${Object.keys(data).map((id) => {
+                  // eslint-disable-next-line security/detect-object-injection
+                  const src = data[id]
+                  return `${id} -> ${src.pmtiles || src.mbtiles || 'unknown'}`
+                }).join(', ')}`,
+              )
               return {
-                inputFile: resolvedInputFile,
-                fileType: resolvedFileType,
-                s3Profile: resolvedS3Profile,
-                requestPayer: resolvedRequestPayer,
-                s3Region: resolvedS3Region,
-                s3UrlFormat: resolvedS3UrlFormat,
-                sparse: resolvedSparse,
+                inputFile: undefined,
+                fileType: undefined,
+                s3Profile: undefined,
+                requestPayer: false,
+                s3Region: undefined,
+                s3UrlFormat: undefined,
+                sparse: true,
               }
-            },
-          ),
+            }
+
+            // PMTiles supports remote URLs (HTTP and S3), skip path resolution for those
+            if (!isValidRemoteUrl(resolvedInputFile)) {
+              // Ensure options.paths and options.paths[resolvedFileType] exist before trying to use them
+              if (
+                options &&
+                options.paths &&
+                // eslint-disable-next-line security/detect-object-injection -- resolvedFileType is either 'pmtiles' or 'mbtiles'
+                options.paths[resolvedFileType]
+              ) {
+                resolvedInputFile = path.resolve(
+                  // eslint-disable-next-line security/detect-object-injection -- resolvedFileType is either 'pmtiles' or 'mbtiles'
+                  options.paths[resolvedFileType],
+                  resolvedInputFile,
+                )
+              } else {
+                console.warn(`Path configuration missing for fileType: ${resolvedFileType}. Using relative path for: ${resolvedInputFile}`,)
+              }
+            }
+
+            return {
+              inputFile: resolvedInputFile,
+              fileType: resolvedFileType,
+              s3Profile: resolvedS3Profile,
+              requestPayer: resolvedRequestPayer,
+              s3Region: resolvedS3Region,
+              s3UrlFormat: resolvedS3UrlFormat,
+              sparse: resolvedSparse,
+            }
+          },
         )
       } else {
         item.serve_rendered = false
@@ -719,25 +675,17 @@ async function start (opts) {
         const item = data[id]
 
         if (!item.pmtiles && !item.mbtiles) {
-          console.log(
-            `Missing "pmtiles" or "mbtiles" property for ${id} data source`,
-          )
+          console.log(`Missing "pmtiles" or "mbtiles" property for ${id} data source`,)
           continue
         }
 
-        dataLoadPromises.push(
-          serve_data.add(options, serving.data, item, id, opts),
-        )
+        dataLoadPromises.push(serve_data.add(options, serving.data, item, id, opts),)
       }
       return Promise.all(dataLoadPromises)
     }),
   )
 
-  startupPromises.push(
-    serve_font(options, serving.fonts, opts).then((sub) => {
-      app.use('/', sub)
-    }),
-  )
+  startupPromises.push(serve_font(options, serving.fonts, opts).then((sub) => {app.use('/', sub)}),)
   if (options.serveAllStyles) {
     fs.readdir(options.paths.styles, { withFileTypes: true }, (err, files) => {
       if (err) {
@@ -749,15 +697,16 @@ async function start (opts) {
           const item = {
             style: file.name,
           }
-          addStyle(id, item, false, false)
+          // Fire-and-forget: addStyle now awaits serve_rendered.add internally, so a rendered-init failure here would otherwise be an unhandled rejection.
+          // For dynamically discovered styles we log and continue rather than exit.
+          addStyle(id, item, false, false).catch((err) => {
+            console.error(`Error adding style "${id}":`, err && err.stack ? err.stack : err)
+          })
         }
       }
     })
 
-    const watcher = chokidar.watch(
-      path.join(options.paths.styles, '*.json'),
-      {},
-    )
+    const watcher = chokidar.watch(path.join(options.paths.styles, '*.json'), {},)
     cleanup = async () => {
       await watcher.close()
     }
@@ -772,10 +721,11 @@ async function start (opts) {
         }
 
         if (eventType == 'add' || eventType == 'change') {
-          const item = {
-            style: filename,
-          }
-          addStyle(id, item, false, false)
+          const item = { style: filename, }
+          // Fire-and-forget (see note above): swallow rejection with a log so a failed hot-reload of one style cannot bring the whole server down.
+          addStyle(id, item, false, false).catch((err) => {
+            console.error(`Error adding style "${id}":`, err && err.stack ? err.stack : err)
+          })
         }
       }
     })
@@ -790,9 +740,7 @@ async function start (opts) {
    */
   app.get('/styles.json', (req, res, next) => {
     const result = []
-    const query = req.query.key
-      ? `?key=${encodeURIComponent(req.query.key)}`
-      : ''
+    const query = req.query.key ? `?key=${encodeURIComponent(req.query.key)}` : ''
     for (const id of Object.keys(serving.styles)) {
       // eslint-disable-next-line security/detect-object-injection -- id is from Object.keys of serving.styles
       const styleJSON = serving.styles[id].styleJSON
@@ -807,7 +755,10 @@ async function start (opts) {
         )}styles/${id}/style.json${query}`,
       })
     }
-    setCacheControl(res, options, 'metadata')
+    setHostDerivedCacheControl(res, options, 'metadata', {
+      publicUrl: opts.publicUrl,
+      allowedHosts: opts.allowedHosts,
+    })
     res.send(result)
   })
 
@@ -857,6 +808,10 @@ async function start (opts) {
    */
   app.get('{/:tileSize}/rendered.json', (req, res, next) => {
     const tileSize = allowedTileSizes(req.params['tileSize'])
+    setHostDerivedCacheControl(res, options, 'metadata', {
+      publicUrl: opts.publicUrl,
+      allowedHosts: opts.allowedHosts,
+    })
     res.send(addTileJSONs([], req, 'rendered', parseInt(tileSize, 10)))
   })
 
@@ -867,7 +822,10 @@ async function start (opts) {
    * @returns {void}
    */
   app.get('/data.json', (req, res) => {
-    setCacheControl(res, options, 'metadata')
+    setHostDerivedCacheControl(res, options, 'metadata', {
+      publicUrl: opts.publicUrl,
+      allowedHosts: opts.allowedHosts,
+    })
     res.send(addTileJSONs([], req, 'data', undefined))
   })
 
@@ -881,7 +839,10 @@ async function start (opts) {
    */
   app.get('{/:tileSize}/index.json', (req, res, next) => {
     const tileSize = allowedTileSizes(req.params['tileSize'])
-    setCacheControl(res, options, 'metadata')
+    setHostDerivedCacheControl(res, options, 'metadata', {
+      publicUrl: opts.publicUrl,
+      allowedHosts: opts.allowedHosts,
+    })
     res.send(
       addTileJSONs(
         addTileJSONs([], req, 'rendered', parseInt(tileSize, 10)),
@@ -894,10 +855,7 @@ async function start (opts) {
 
   // ------------------------------------
   // serve web presentations
-  app.use(
-    '/',
-    express.static(path.join(__dirname, '../public/resources'), staticOptions),
-  )
+  app.use('/', express.static(path.join(__dirname, '../public/resources'), staticOptions),)
 
   const templates = path.join(__dirname, '../public/templates')
 
@@ -913,10 +871,7 @@ async function start (opts) {
     if (template === 'index') {
       if (options.frontPage === false) {
         return
-      } else if (
-        options.frontPage &&
-        options.frontPage.constructor === String
-      ) {
+      } else if (options.frontPage && options.frontPage.constructor === String) {
         templateFile = path.resolve(paths.root, options.frontPage)
       }
     }
@@ -931,20 +886,16 @@ async function start (opts) {
         if (dataGetter) {
           data = dataGetter(req)
           if (data) {
-            data['server_version'] =
-              `${packageJson.name} v${packageJson.version}`
+            data['server_version'] = `${packageJson.name} v${packageJson.version}`
             data['public_url'] = opts.publicUrl || '/'
             data['is_light'] = isLight
             data['leaflet_retina'] = options.leafletRetina === true
-            data['key_query_part'] = req.query.key
-              ? `key=${encodeURIComponent(req.query.key)}&amp;`
-              : ''
-            data['key_query'] = req.query.key
-              ? `?key=${encodeURIComponent(req.query.key)}`
-              : ''
-            if (template === 'wmts') res.set('Content-Type', 'text/xml')
-            // Viewer markup is not versioned, so it must not be cached or a
-            // redeploy would keep serving the old page.
+            data['key_query_part'] = req.query.key ? `key=${encodeURIComponent(req.query.key)}&amp;` : ''
+            data['key_query'] = req.query.key ? `?key=${encodeURIComponent(req.query.key)}` : ''
+            if (template === 'wmts') {
+              res.set('Content-Type', 'text/xml')
+            }
+            // Viewer markup is not versioned, so it must not be cached or a redeploy would keep serving the old page.
             setCacheControl(res, options, 'html')
             return res.status(200).send(compiled(data))
           } else {
@@ -957,7 +908,8 @@ async function start (opts) {
       })
     } catch (err) {
       console.error(`Error reading template file: ${templateFile}`, err)
-      throw new Error(`Template not found: ${err.message}`, { cause: err }) //throw an error so that the server doesnt start
+      //throw an error so that the server doesn't start
+      throw new Error(`Template not found: ${err.message}`, { cause: err })
     }
   }
 
@@ -981,15 +933,11 @@ async function start (opts) {
       if (style.serving_rendered) {
         const { center } = style.serving_rendered.tileJSON
         if (center) {
-          style.viewer_hash = `#${center[2]}/${center[1].toFixed(
-            5,
-          )}/${center[0].toFixed(5)}`
+          style.viewer_hash = `#${center[2]}/${center[1].toFixed(5)}/${center[0].toFixed(5)}`
 
           const centerPx = mercator.px([center[0], center[1]], center[2])
           // Set thumbnail default size to be 256px x 256px
-          style.thumbnail = `${Math.floor(center[2])}/${Math.floor(
-            centerPx[0] / 256,
-          )}/${Math.floor(centerPx[1] / 256)}.png`
+          style.thumbnail = `${Math.floor(center[2])}/${Math.floor(centerPx[0] / 256)}/${Math.floor(centerPx[1] / 256)}.png`
         }
 
         const tileSize = 512
@@ -1018,9 +966,7 @@ async function start (opts) {
       const { center } = tileJSON
 
       if (center) {
-        data.viewer_hash = `#${center[2]}/${center[1].toFixed(
-          5,
-        )}/${center[0].toFixed(5)}`
+        data.viewer_hash = `#${center[2]}/${center[1].toFixed(5)}/${center[0].toFixed(5)}`
       }
 
       const tileSize = undefined
@@ -1039,10 +985,7 @@ async function start (opts) {
 
       data.is_vector = tileJSON.format === 'pbf'
       if (!data.is_vector) {
-        if (
-          tileJSON.encoding === 'terrarium' ||
-          tileJSON.encoding === 'mapbox'
-        ) {
+        if (tileJSON.encoding === 'terrarium' || tileJSON.encoding === 'mapbox') {
           if (!isLight) {
             data.elevation_link = getTileUrls(
               req,
@@ -1059,25 +1002,10 @@ async function start (opts) {
         }
         if (center) {
           const centerPx = mercator.px([center[0], center[1]], center[2])
-          data.thumbnail = `${Math.floor(center[2])}/${Math.floor(
-            centerPx[0] / 256,
-          )}/${Math.floor(centerPx[1] / 256)}.${tileJSON.format}`
+          data.thumbnail = `${Math.floor(center[2])}/${Math.floor(centerPx[0] / 256)}/${Math.floor(centerPx[1] / 256)}.${tileJSON.format}`
         }
       }
 
-      if (data.filesize) {
-        let suffix = 'kB'
-        let size = parseInt(tileJSON.filesize, 10) / 1024
-        if (size > 1024) {
-          suffix = 'MB'
-          size /= 1024
-        }
-        if (size > 1024) {
-          suffix = 'GB'
-          size /= 1024
-        }
-        data.formatted_filesize = `${size.toFixed(2)} ${suffix}`
-      }
       // eslint-disable-next-line security/detect-object-injection -- id is from Object.keys of serving.data
       datas[id] = data
     }
@@ -1119,8 +1047,13 @@ async function start (opts) {
    */
   serveTemplate('/styles/:id/wmts.xml', 'wmts', (req) => {
     const { id } = req.params
-    // eslint-disable-next-line security/detect-object-injection -- id is route parameter from URL
-    const wmts = clone((serving.styles || {})[id])
+    // Own-property check so 'constructor'/'__proto__' don't resolve to a
+    // prototype member and render a garbage WMTS document.
+    if (!Object.hasOwn(serving.styles || {}, id)) {
+      return null
+    }
+    // eslint-disable-next-line security/detect-object-injection -- id checked via Object.hasOwn above
+    const wmts = clone(serving.styles[id])
 
     if (!wmts) {
       return null
@@ -1146,16 +1079,18 @@ async function start (opts) {
    */
   serveTemplate('/data{/:view}/:id/', 'data', (req) => {
     const { id, view } = req.params
-    // eslint-disable-next-line security/detect-object-injection -- id is route parameter from URL
+    // 'constructor'/'__proto__' resolve on Object.prototype, so a plain lookup
+    // returns a truthy value that then crashes on data.tileJSON below. Require an own property.
+    if (!Object.hasOwn(serving.data, id)) {
+      return null
+    }
+    // eslint-disable-next-line security/detect-object-injection -- id checked via Object.hasOwn above
     const data = serving.data[id]
 
     if (!data) {
       return null
     }
-    const is_terrain =
-      (data.tileJSON.encoding === 'terrarium' ||
-        data.tileJSON.encoding === 'mapbox') &&
-      view === 'preview'
+    const is_terrain = (data.tileJSON.encoding === 'terrarium' || data.tileJSON.encoding === 'mapbox') && view === 'preview'
 
     return {
       ...data,
@@ -1218,9 +1153,7 @@ async function start (opts) {
       process.exit(1)
     } else if (err.code === 'EACCES') {
       console.error(`ERROR: Permission denied to bind to port ${port}.`)
-      console.error(
-        `Try using a port number above 1024 or run with appropriate permissions.`,
-      )
+      console.error(`Try using a port number above 1024 or run with appropriate permissions.`)
       process.exit(1)
     } else {
       console.error('Server error:', err.message)
@@ -1243,16 +1176,12 @@ async function start (opts) {
       await new Promise((resolve) => {
         metricsServer = metricsApp.listen(opts.metricsPort, '127.0.0.1')
         metricsServer.once('error', (err) => {
-          console.warn(
-            `[metrics] Failed to start metrics server: ${err.message}`,
-          )
+          console.warn(`[metrics] Failed to start metrics server: ${err.message}`,)
           resolve() // don't crash — metrics are non-critical
         })
         metricsServer.once('listening', resolve)
       })
-      console.log(
-        `Prometheus metrics available at http://localhost:${opts.metricsPort}/metrics`,
-      )
+      console.log(`Prometheus metrics available at http://localhost:${opts.metricsPort}/metrics`,)
     } catch (err) {
       console.warn(`[metrics] Failed to initialize metrics: ${err.message}`)
     }
@@ -1265,6 +1194,7 @@ async function start (opts) {
     serving,
     cleanup,
     metricsServer,
+    accessLogStream,
   }
 }
 
@@ -1333,6 +1263,10 @@ export async function server (opts) {
         if (running.metricsServer) {
           await new Promise((resolve) => running.metricsServer.close(resolve))
         }
+        // Close the previous access-log file descriptor before start() opens a fresh one, so a --log_file deployment doesn't leak a fd per reload.
+        if (running.accessLogStream) {
+          await new Promise((resolve) => running.accessLogStream.end(resolve))
+        }
         await running.cleanup()
         await serve_data.clear(running.serving.data)
         if (!isLight) {
@@ -1347,6 +1281,7 @@ export async function server (opts) {
         running.serving = restarted.serving
         running.cleanup = restarted.cleanup
         running.metricsServer = restarted.metricsServer
+        running.accessLogStream = restarted.accessLogStream
         await running.startupPromise
         reloadAgain = pendingReload
       }

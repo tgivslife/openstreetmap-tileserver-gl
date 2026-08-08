@@ -35,6 +35,7 @@ import {
   listFonts,
   readFile,
   setCacheControl,
+  setHostDerivedCacheControl,
 } from './utils.js'
 import { getPMtilesInfo, openPMtiles } from './pmtiles_adapter.js'
 import { renderAttribution, renderOverlay, renderWatermark } from './render.js'
@@ -171,9 +172,12 @@ export function getSecureMergedParams (query, body) {
   const result = Object.create(null)
 
   const accumulate = (source) => {
-    if (!source) return
-    if (typeof source !== 'object' || Array.isArray(source))
+    if (!source) {
+      return
+    }
+    if (typeof source !== 'object' || Array.isArray(source)) {
       throw new Error(`Invalid data.`)
+    }
 
     for (const [key, value] of Object.entries(source)) {
       if (!ALLOW_STATIC_PARAMS.has(key)) {
@@ -181,14 +185,11 @@ export function getSecureMergedParams (query, body) {
       }
 
       const isPrimitive = value === null || typeof value !== 'object'
-      const isPrimitiveArray =
-        Array.isArray(value) &&
-        value.every((v) => v === null || typeof v !== 'object')
+      const isPrimitiveArray = Array.isArray(value) && value.every((v) => v === null || typeof v !== 'object')
 
-      if (!isPrimitive && !isPrimitiveArray)
-        throw new Error(
-          `Invalid value type for key "${key}": nested objects are not allowed.`,
-        )
+      if (!isPrimitive && !isPrimitiveArray) {
+        throw new Error(`Invalid value type for key "${key}": nested objects are not allowed.`,)
+      }
 
       const ensureArray = (v) => (Array.isArray(v) ? v : [v])
       if (key in result) {
@@ -342,8 +343,7 @@ function extractPathsFromQuery (query, transformer) {
 }
 
 /**
- * Parses marker options provided via query and sets corresponding attributes
- * on marker object.
+ * Parses marker options provided via query and sets corresponding attributes on marker object.
  * Options adhere to the following format
  * [optionName]:[optionValue]
  * @param {Array<string>} optionsList List of option strings.
@@ -370,8 +370,7 @@ function parseMarkerOptions (optionsList, marker) {
         }
         break
       }
-      // Icon offset as positive or negative pixel value in the following
-      // format [offsetX],[offsetY] where [offsetY] is optional
+      // Icon offset as positive or negative pixel value in the following format [offsetX],[offsetY] where [offsetY] is optional
       case 'offset': {
         const providedOffset = optionParts[1].split(',')
         const offsetX = parseFloat(providedOffset[0])
@@ -411,8 +410,7 @@ function extractMarkersFromQuery (query, options, transformer) {
 
   const markers = []
 
-  // Check if multiple markers have been provided and mimic a list if it's a
-  // single marker.
+  // Check if multiple markers have been provided and mimic a list if it's a single marker.
   const providedMarkers = Array.isArray(query.marker)
     ? query.marker
     : [query.marker]
@@ -442,8 +440,7 @@ function extractMarkersFromQuery (query, options, transformer) {
     }
 
     let iconURI = markerParts[1]
-    // Check if icon is served via http otherwise marker icons are expected to
-    // be provided as filepaths relative to configured icon path
+    // Check if icon is served via http otherwise marker icons are expected to be provided as filepaths relative to configured icon path
     const isRemoteURL = isValidHttpUrl(iconURI)
     const isDataURL = iconURI.startsWith('data:')
     if (!(isRemoteURL || isDataURL)) {
@@ -502,18 +499,20 @@ function extractMarkersFromQuery (query, options, transformer) {
 function calcZForBBox (bbox, w, h, query) {
   let z = 25
 
-  const padding = query.padding !== undefined ? parseFloat(query.padding) : 0.1
+  // parseFloat can yield NaN, and padding <= -0.5 drives the denominator (1 + 2p) to zero/negative -> Math.log(negative) -> z = NaN
+  // flowing into the render params. Only accept a finite, non-negative padding; otherwise use the default.
+  const paddingRaw = parseFloat(query.padding)
+  const padding = Number.isFinite(paddingRaw) && paddingRaw >= 0 ? paddingRaw : 0.1
 
   const minCorner = mercator.px([bbox[0], bbox[3]], z)
   const maxCorner = mercator.px([bbox[2], bbox[1]], z)
   const w_ = w / (1 + 2 * padding)
   const h_ = h / (1 + 2 * padding)
 
-  z -=
-    Math.max(
-      Math.log((maxCorner[0] - minCorner[0]) / w_),
-      Math.log((maxCorner[1] - minCorner[1]) / h_),
-    ) / Math.LN2
+  z -= Math.max(
+    Math.log((maxCorner[0] - minCorner[0]) / w_),
+    Math.log((maxCorner[1] - minCorner[1]) / h_),
+  ) / Math.LN2
 
   z = Math.max(Math.log(Math.max(w, h) / 256) / Math.LN2, Math.min(25, z))
 
@@ -565,6 +564,12 @@ async function respondImage (
     return res.status(400).send('Invalid center')
   }
 
+  // Backstop: never dispatch a non-finite zoom (NaN/Infinity) to the native renderer, regardless of which caller computed it.
+  // Range is left to callers — the center branch rejects z<0/z>25, while bbox/auto legitimately yield a small or negative z that is clamped downstream by Math.max(0, z).
+  if (!Number.isFinite(z)) {
+    return res.status(400).send('Invalid zoom')
+  }
+
   if (
     Math.min(width, height) <= 0 ||
     Math.max(width, height) * scale > (options.maxSize || 2048) ||
@@ -612,9 +617,7 @@ async function respondImage (
     }
 
     if (!renderer) {
-      console.error(
-        'Renderer is null - likely crashed or failed to initialize',
-      )
+      console.error('Renderer is null - likely crashed or failed to initialize',)
       if (!res.headersSent) {
         if (metricsModule) {
           metricsModule.tileErrorsTotal.inc({ type: 'rendered', name: id })
@@ -658,7 +661,9 @@ async function respondImage (
       height,
     }
 
-    // HACK(Part 1) 256px tiles are a zoom level lower than maplibre-native default tiles. this hack allows tileserver-gl to support zoom 0 256px tiles, which would actually be zoom -1 in maplibre-native. Since zoom -1 isn't supported, a double sized zoom 0 tile is requested and resized in Part 2.
+    // HACK(Part 1) 256px tiles are a zoom level lower than maplibre-native default tiles. this hack allows tileserver-gl
+    // to support zoom 0 256px tiles, which would actually be zoom -1 in maplibre-native. Since zoom -1 isn't supported,
+    // a double sized zoom 0 tile is requested and resized in Part 2.
     if (z === 0 && width === 256) {
       params.width *= 2
       params.height *= 2
@@ -710,134 +715,151 @@ async function respondImage (
           return
         }
 
-        // Only release if render was successful
-        pool.release(renderer)
+        let rendererHandled = false
+        try {
+          // Only release if render was successful
+          pool.release(renderer)
+          rendererHandled = true
 
-        const image = sharp(data, {
-          raw: {
-            premultiplied: true,
-            width: params.width * scale,
-            height: params.height * scale,
-            channels: 4,
-          },
-        })
-
-        if (z > 0 && tileMargin > 0) {
-          const y = mercator.px(params.center, z)[1]
-          const yoffset = Math.max(
-            Math.min(0, y - 128 - tileMargin),
-            y + 128 + tileMargin - Math.pow(2, z + 8),
-          )
-          image.extract({
-            left: tileMargin * scale,
-            top: (tileMargin + yoffset) * scale,
-            width: width * scale,
-            height: height * scale,
+          const image = sharp(data, {
+            raw: {
+              premultiplied: true,
+              width: params.width * scale,
+              height: params.height * scale,
+              channels: 4,
+            },
           })
-        }
 
-        // HACK(Part 2) 256px tiles are a zoom level lower than maplibre-native default tiles. this hack allows tileserver-gl to support zoom 0 256px tiles, which would actually be zoom -1 in maplibre-native. Since zoom -1 isn't supported, a double sized zoom 0 tile is requested and resized here.
-        if (z === 0 && width === 256) {
-          image.resize(width * scale, height * scale)
-        }
+          if (z > 0 && tileMargin > 0) {
+            const y = mercator.px(params.center, z)[1]
+            const yoffset = Math.max(
+              Math.min(0, y - 128 - tileMargin),
+              y + 128 + tileMargin - Math.pow(2, z + 8),
+            )
+            image.extract({
+              left: tileMargin * scale,
+              top: (tileMargin + yoffset) * scale,
+              width: width * scale,
+              height: height * scale,
+            })
+          }
 
-        const composites = []
-        if (overlay) {
-          composites.push({ input: overlay })
-        }
-        if (item.watermark) {
-          const canvas = renderWatermark(width, height, scale, item.watermark)
-          composites.push({ input: canvas.toBuffer() })
-        }
+          // HACK(Part 2) 256px tiles are a zoom level lower than maplibre-native default tiles.
+          // this hack allows tileserver-gl to support zoom 0 256px tiles, which would actually be zoom -1 in maplibre-native.
+          // Since zoom -1 isn't supported, a double sized zoom 0 tile is requested and resized here.
+          if (z === 0 && width === 256) {
+            image.resize(width * scale, height * scale)
+          }
 
-        if (mode === 'static' && item.staticAttributionText) {
-          const canvas = renderAttribution(
-            width,
-            height,
-            scale,
-            item.staticAttributionText,
-          )
-          composites.push({ input: canvas.toBuffer() })
-        }
+          const composites = []
+          if (overlay) {
+            composites.push({ input: overlay })
+          }
+          if (item.watermark) {
+            const canvas = renderWatermark(width, height, scale, item.watermark)
+            composites.push({ input: canvas.toBuffer() })
+          }
 
-        if (composites.length > 0) {
-          image.composite(composites)
-        }
+          if (mode === 'static' && item.staticAttributionText) {
+            const canvas = renderAttribution(
+              width,
+              height,
+              scale,
+              item.staticAttributionText,
+            )
+            composites.push({ input: canvas.toBuffer() })
+          }
 
-        // Legacy formatQuality is deprecated but still works
-        const formatQualities = options.formatQuality || {}
-        if (Object.keys(formatQualities).length !== 0) {
-          console.log(
-            'WARNING: The formatQuality option is deprecated and has been replaced with formatOptions. Please see the documentation. The values from formatQuality will be used if a quality setting is not provided via formatOptions.',
-          )
-        }
-        // eslint-disable-next-line security/detect-object-injection -- format is validated above
-        const formatQuality = formatQualities[format]
-        // eslint-disable-next-line security/detect-object-injection -- format is validated above
-        const formatOptions = (options.formatOptions || {})[format] || {}
+          if (composites.length > 0) {
+            image.composite(composites)
+          }
 
-        if (format === 'png') {
-          image.png({
-            progressive: formatOptions.progressive,
-            compressionLevel: formatOptions.compressionLevel,
-            adaptiveFiltering: formatOptions.adaptiveFiltering,
-            palette: formatOptions.palette,
-            quality: formatOptions.quality,
-            effort: formatOptions.effort,
-            colors: formatOptions.colors,
-            dither: formatOptions.dither,
-          })
-        } else if (format === 'jpeg') {
-          image.jpeg({
-            quality: formatOptions.quality || formatQuality || 80,
-            progressive: formatOptions.progressive,
-          })
-        } else if (format === 'webp') {
-          image.webp({ quality: formatOptions.quality || formatQuality || 90 })
-        }
+          // Legacy formatQuality is deprecated but still works
+          const formatQualities = options.formatQuality || {}
+          if (Object.keys(formatQualities).length !== 0) {
+            console.log('WARNING: The formatQuality option is deprecated and has been replaced with formatOptions. Please see the documentation. The values from formatQuality will be used if a quality setting is not provided via formatOptions.',)
+          }
+          // eslint-disable-next-line security/detect-object-injection -- format is validated above
+          const formatQuality = formatQualities[format]
+          // eslint-disable-next-line security/detect-object-injection -- format is validated above
+          const formatOptions = (options.formatOptions || {})[format] || {}
 
-        image.toBuffer((err, buffer, info) => {
-          if (err || !buffer) {
-            console.error('Sharp error:', err)
+          if (format === 'png') {
+            image.png({
+              progressive: formatOptions.progressive,
+              compressionLevel: formatOptions.compressionLevel,
+              adaptiveFiltering: formatOptions.adaptiveFiltering,
+              palette: formatOptions.palette,
+              quality: formatOptions.quality,
+              effort: formatOptions.effort,
+              colors: formatOptions.colors,
+              dither: formatOptions.dither,
+            })
+          } else if (format === 'jpeg') {
+            image.jpeg({
+              quality: formatOptions.quality || formatQuality || 80,
+              progressive: formatOptions.progressive,
+            })
+          } else if (format === 'webp') {
+            image.webp({ quality: formatOptions.quality || formatQuality || 90 })
+          }
+
+          image.toBuffer((err, buffer, info) => {
+            if (err || !buffer) {
+              console.error('Sharp error:', err)
+              if (!res.headersSent) {
+                if (metricsModule) {
+                  metricsModule.tileErrorsTotal.inc({
+                    type: 'rendered',
+                    name: id,
+                  })
+                }
+                return res.status(500).send('Image processing failed')
+              }
+              return
+            }
+
             if (!res.headersSent) {
               if (metricsModule) {
-                metricsModule.tileErrorsTotal.inc({
+                const renderDurationSec = Number(process.hrtime.bigint() - renderStart) / 1e9
+                metricsModule.tilesServedTotal.inc({
                   type: 'rendered',
                   name: id,
                 })
+                const zoomLabel = process.env.TILESERVER_GL_METRICS_ZOOM === 'true' ? String(z) : 'all'
+                metricsModule.tileRenderDuration.observe(
+                  { name: id, zoom: zoomLabel },
+                  renderDurationSec,
+                )
               }
-              return res.status(500).send('Image processing failed')
+              res.set({
+                'Last-Modified': item.lastModified,
+                'Content-Type': `image/${format}`,
+              })
+              // Deterministic for a given set of parameters, both for tiles and for static images.
+              setCacheControl(res, options, 'tile')
+              return res.status(200).send(buffer)
             }
-            return
+          })
+        } catch (renderCbError) {
+          // A synchronous throw here (sharp setup, the watermark/attribution canvas toBuffer, or the format encoder) runs inside maplibre-native's render callback;
+          // letting it escape would crash the process instead of failing just this request. Contain it and return 500.
+          // The renderer was already released on success, so only reclaim it if we threw before that.
+          console.error('Unexpected error building rendered image:', renderCbError)
+          if (!rendererHandled) {
+            try {
+              pool.removeBadObject(renderer)
+            } catch (e) {
+              console.error('Error removing renderer after callback error:', e)
+            }
           }
-
           if (!res.headersSent) {
             if (metricsModule) {
-              const renderDurationSec =
-                Number(process.hrtime.bigint() - renderStart) / 1e9
-              metricsModule.tilesServedTotal.inc({
-                type: 'rendered',
-                name: id,
-              })
-              const zoomLabel =
-                process.env.TILESERVER_GL_METRICS_ZOOM === 'true'
-                  ? String(z)
-                  : 'all'
-              metricsModule.tileRenderDuration.observe(
-                { name: id, zoom: zoomLabel },
-                renderDurationSec,
-              )
+              metricsModule.tileErrorsTotal.inc({ type: 'rendered', name: id })
             }
-            res.set({
-              'Last-Modified': item.lastModified,
-              'Content-Type': `image/${format}`,
-            })
-            // Deterministic for a given set of parameters, both for tiles and
-            // for static images.
-            setCacheControl(res, options, 'tile')
-            return res.status(200).send(buffer)
+            return res.status(500).send('Image processing failed')
           }
-        })
+        }
       })
     } catch (error) {
       clearTimeout(renderTimeout)
@@ -918,7 +940,8 @@ async function handleTileRequest (
   if (tileSize) {
     parsedTileSize = parseInt(allowedTileSizes(tileSize), 10)
 
-    if (parsedTileSize == null) {
+    // allowedTileSizes returns undefined for anything but 256/512, so parseInt yields NaN — which `== null` never catches. Use Number.isNaN.
+    if (Number.isNaN(parsedTileSize)) {
       return res.status(400).send('Invalid Tile Size')
     }
   }
@@ -940,7 +963,6 @@ async function handleTileRequest (
     z,
   )
 
-  // prettier-ignore
   return await respondImage(
     options, item, z, tileCenter[0], tileCenter[1], 0, 0, parsedTileSize, parsedTileSize, scale, format, res, null,
     'tile', id,
@@ -1014,6 +1036,17 @@ async function handleStaticRequest (
     return res.sendStatus(404)
   }
 
+  // Enforce the same size cap respondImage applies (see below), but *before* renderOverlay allocates a (scale*width x scale*height) canvas.
+  // Otherwise a request such as .../16000x16000.png?path=... allocates ~1 GB up front — and a few concurrent ones can OOM the process,
+  // before respondImage ever rejects the size. Applies to all three static branches, which each call renderOverlay.
+  const maxSize = options.maxSize || 2048
+  if (
+    Math.min(parsedWidth, parsedHeight) <= 0 ||
+    Math.max(parsedWidth, parsedHeight) * scale > maxSize
+  ) {
+    return res.status(400).send('Invalid size')
+  }
+
   if (staticTypeMatch.groups.lon) {
     // Center Based Static Image
     const z = parseFloat(staticTypeMatch.groups.zoom) || 0
@@ -1021,13 +1054,13 @@ async function handleStaticRequest (
     let y = parseFloat(staticTypeMatch.groups.lat) || 0
     const bearing = parseFloat(staticTypeMatch.groups.bearing) || 0
     const pitch = parseInt(staticTypeMatch.groups.pitch) || 0
-    if (z < 0) {
+    // Cap the upper bound too: an unbounded z overflows `1 << z` in render.js (the 32-bit shift wraps at z >= 31 and sign-flips),
+    // and pushes an extreme zoom into the renderer. 25 matches calcZForBBox's ceiling.
+    if (z < 0 || z > 25) {
       return res.status(404).send('Invalid zoom')
     }
 
-    const transformer = isRaw
-      ? mercator.inverse.bind(mercator)
-      : item.dataProjWGStoInternalWGS
+    const transformer = isRaw ? mercator.inverse.bind(mercator) : item.dataProjWGStoInternalWGS
 
     if (transformer) {
       const ll = transformer([x, y])
@@ -1037,12 +1070,10 @@ async function handleStaticRequest (
 
     const paths = extractPathsFromQuery(req.query, transformer)
     const markers = extractMarkersFromQuery(req.query, options, transformer)
-    // prettier-ignore
     const overlay = await renderOverlay(
       z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query,
     )
 
-    // prettier-ignore
     return await respondImage(
       options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static', id,
     )
@@ -1052,12 +1083,15 @@ async function handleStaticRequest (
     const miny = parseFloat(staticTypeMatch.groups.miny) || 0
     const maxx = parseFloat(staticTypeMatch.groups.maxx) || 0
     const maxy = parseFloat(staticTypeMatch.groups.maxy) || 0
+    // A degenerate or inverted bbox makes calcZForBBox take log() of a non-positive span, yielding a NaN/Infinity zoom
+    // that would otherwise be handed to the native renderer.
+    if (maxx <= minx || maxy <= miny) {
+      return res.status(400).send('Invalid bounding box')
+    }
     const bbox = [minx, miny, maxx, maxy]
     let center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
 
-    const transformer = isRaw
-      ? mercator.inverse.bind(mercator)
-      : item.dataProjWGStoInternalWGS
+    const transformer = isRaw ? mercator.inverse.bind(mercator) : item.dataProjWGStoInternalWGS
 
     if (transformer) {
       const minCorner = transformer(bbox.slice(0, 2))
@@ -1077,12 +1111,10 @@ async function handleStaticRequest (
 
     const paths = extractPathsFromQuery(req.query, transformer)
     const markers = extractMarkersFromQuery(req.query, options, transformer)
-    // prettier-ignore
     const overlay = await renderOverlay(
       z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query,
     )
 
-    // prettier-ignore
     return await respondImage(
       options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static', id,
     )
@@ -1091,9 +1123,7 @@ async function handleStaticRequest (
     const bearing = 0
     const pitch = 0
 
-    const transformer = isRaw
-      ? mercator.inverse.bind(mercator)
-      : item.dataProjWGStoInternalWGS
+    const transformer = isRaw ? mercator.inverse.bind(mercator) : item.dataProjWGStoInternalWGS
 
     const paths = extractPathsFromQuery(req.query, transformer)
     const markers = extractMarkersFromQuery(req.query, options, transformer)
@@ -1136,15 +1166,9 @@ async function handleStaticRequest (
     const x = center[0]
     const y = center[1]
 
-    // prettier-ignore
-    const overlay = await renderOverlay(
-      z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query,
-    )
+    const overlay = await renderOverlay(z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query,)
 
-    // prettier-ignore
-    return await respondImage(
-      options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static', id,
-    )
+    return await respondImage(options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static', id,)
   } else {
     return res.sendStatus(404)
   }
@@ -1173,10 +1197,7 @@ export const serve_rendered = {
 
     app.post(`/:id{/:p1}/:p2/:p3/:p4{@:scale}{.:format}`, (req, res, next) => {
       const { p1, p2 } = req.params
-      const requestType =
-        (!p1 && p2 === 'static') || (p1 === 'static' && p2 === 'raw')
-          ? 'static'
-          : 'tile'
+      const requestType = (!p1 && p2 === 'static') || (p1 === 'static' && p2 === 'raw') ? 'static' : 'tile'
 
       if (requestType === 'tile') {
         return res.status(405).send('Method Not Allowed')
@@ -1190,9 +1211,7 @@ export const serve_rendered = {
           try {
             secureParse(buf.toString())
           } catch (err) {
-            const error = new Error(
-              `Invalid JSON or forbidden key detected: ${err.message}`,
-            )
+            const error = new Error(`Invalid JSON or forbidden key detected: ${err.message}`,)
             error.status = 400
             throw error
           }
@@ -1220,14 +1239,10 @@ export const serve_rendered = {
     const renderHandler = async (req, res, next) => {
       try {
         const { p1, p2, id, p3, p4, scale, format } = req.params
-        const requestType =
-          (!p1 && p2 === 'static') || (p1 === 'static' && p2 === 'raw')
-            ? 'static'
-            : 'tile'
+        const requestType = (!p1 && p2 === 'static') || (p1 === 'static' && p2 === 'raw') ? 'static' : 'tile'
 
         if (verbose >= 3) {
-          console.log(
-            `Handling rendered %s request for: /styles/%s%s/%s/%s/%s%s.%s`,
+          console.log(`Handling rendered %s request for: /styles/%s%s/%s/%s/%s%s.%s`,
             requestType,
             String(id).replace(/\n|\r/g, ''),
             p1 ? '/' + String(p1).replace(/\n|\r/g, '') : '',
@@ -1289,8 +1304,7 @@ export const serve_rendered = {
       }
       const tileSize = parseInt(req.params.tileSize, 10) || undefined
       if (verbose >= 3) {
-        console.log(
-          `Handling rendered tilejson request for: /styles/%s%s.json`,
+        console.log(`Handling rendered tilejson request for: /styles/%s%s.json`,
           req.params.tileSize
             ? String(req.params.tileSize).replace(/\n|\r/g, '') + '/'
             : '',
@@ -1298,7 +1312,7 @@ export const serve_rendered = {
         )
       }
       const info = clone(item.tileJSON)
-      info.tileSize = tileSize != undefined ? tileSize : 256
+      info.tileSize = tileSize !== undefined ? tileSize : 256
       info.tiles = getTileUrls(
         req,
         info.tiles,
@@ -1309,7 +1323,10 @@ export const serve_rendered = {
         undefined,
         allowedHosts,
       )
-      setCacheControl(res, options, 'metadata')
+      setHostDerivedCacheControl(res, options, 'metadata', {
+        publicUrl: item.publicUrl,
+        allowedHosts,
+      })
       return res.send(info)
     })
 
@@ -1535,14 +1552,10 @@ export const serve_rendered = {
                 const parsedResponse = {}
 
                 if (responseHeaders.get('last-modified')) {
-                  parsedResponse.modified = new Date(
-                    responseHeaders.get('last-modified'),
-                  )
+                  parsedResponse.modified = new Date(responseHeaders.get('last-modified'),)
                 }
                 if (responseHeaders.get('expires')) {
-                  parsedResponse.expires = new Date(
-                    responseHeaders.get('expires'),
-                  )
+                  parsedResponse.expires = new Date(responseHeaders.get('expires'),)
                 }
                 if (responseHeaders.get('etag')) {
                   parsedResponse.etag = responseHeaders.get('etag')
@@ -1562,17 +1575,11 @@ export const serve_rendered = {
 
                 // Log timeout
                 if (error.name === 'AbortError') {
-                  console.error(
-                    `FETCH TIMEOUT for ${req.url}. ` +
-                    `The request took longer than ${timeoutMs} ms to complete.`,
-                  )
+                  console.error(`FETCH TIMEOUT for ${req.url}. The request took longer than ${timeoutMs} ms to complete.`,)
                 }
 
                 // Log all other errors
-                console.error(
-                  `Error fetching remote URL ${req.url}:`,
-                  error.message || error,
-                )
+                console.error(`Error fetching remote URL ${req.url}:`, error.message || error,)
 
                 if (globalSparse) {
                   // sparse=true -> allow overzoom
@@ -1593,9 +1600,7 @@ export const serve_rendered = {
               if (await existsP(file)) {
                 const inputFileStats = await fsp.stat(file)
                 if (!inputFileStats.isFile() || inputFileStats.size === 0) {
-                  throw Error(
-                    `File is not valid: "${req.url}" - resolved to "${file}"`,
-                  )
+                  throw Error(`File is not valid: "${req.url}" - resolved to "${file}"`,)
                 }
 
                 readFile(file).then((data) => {
@@ -1604,9 +1609,7 @@ export const serve_rendered = {
                   callback(err, null)
                 })
               } else {
-                throw Error(
-                  `File does not exist: "${req.url}" - resolved to "${file}"`,
-                )
+                throw Error(`File does not exist: "${req.url}" - resolved to "${file}"`,)
               }
             }
           },
@@ -1634,14 +1637,10 @@ export const serve_rendered = {
       styleJSON.sprite.forEach((spriteItem) => {
         // Sprites should only be HTTP/HTTPS, not S3
         if (!isValidHttpUrl(spriteItem.url)) {
-          spriteItem.url =
-            'sprites://' +
+          spriteItem.url = 'sprites://' +
             spriteItem.url.replace('{style}', path.basename(styleFile, '.json')).replace(
               '{styleJsonFolder}',
-              path.relative(
-                options.paths.sprites,
-                path.dirname(styleJSONPath),
-              ),
+              path.relative(options.paths.sprites, path.dirname(styleJSONPath),),
             )
         }
       })
@@ -1718,10 +1717,7 @@ export const serve_rendered = {
       // eslint-disable-next-line security/detect-object-injection -- name is from style sources object keys
       let source = styleJSON.sources[name]
       let url = source.url
-      if (
-        url &&
-        (url.startsWith('pmtiles://') || url.startsWith('mbtiles://'))
-      ) {
+      if (url && (url.startsWith('pmtiles://') || url.startsWith('mbtiles://'))) {
         // found pmtiles or mbtiles source, replace with info from local file
         delete source.url
 
@@ -1781,8 +1777,7 @@ export const serve_rendered = {
             // how to do this for multiple sources with different proj4 defs?
             const to3857 = proj4('EPSG:3857')
             const toDataProj = proj4(metadata.proj4)
-            repoobj.dataProjWGStoInternalWGS = (xy) =>
-              to3857.inverse(toDataProj.forward(xy))
+            repoobj.dataProjWGStoInternalWGS = (xy) => to3857.inverse(toDataProj.forward(xy))
           }
 
           const type = source.type
@@ -1811,8 +1806,7 @@ export const serve_rendered = {
           // Vector tiles (pbf) default to false (204), raster tiles default to true (404)
           const isVector = metadata.format === 'pbf'
           // eslint-disable-next-line security/detect-object-injection -- name is from style sources object keys
-          map.sparseFlags[name] =
-            dataInfo.sparse ?? options.sparse ?? !isVector
+          map.sparseFlags[name] = dataInfo.sparse ?? options.sparse ?? !isVector
         } else {
           // MBTiles does not support remote URLs
 
@@ -1831,8 +1825,7 @@ export const serve_rendered = {
             // how to do this for multiple sources with different proj4 defs?
             const to3857 = proj4('EPSG:3857')
             const toDataProj = proj4(info.proj4)
-            repoobj.dataProjWGStoInternalWGS = (xy) =>
-              to3857.inverse(toDataProj.forward(xy))
+            repoobj.dataProjWGStoInternalWGS = (xy) => to3857.inverse(toDataProj.forward(xy))
           }
 
           const type = source.type
@@ -1865,8 +1858,7 @@ export const serve_rendered = {
           // Vector tiles (pbf) default to false (204), raster tiles default to true (404)
           const isVector = info.format === 'pbf'
           // eslint-disable-next-line security/detect-object-injection -- name is from style sources object keys
-          map.sparseFlags[name] =
-            dataInfo.sparse ?? options.sparse ?? !isVector
+          map.sparseFlags[name] = dataInfo.sparse ?? options.sparse ?? !isVector
         }
       }
     }
@@ -1884,31 +1876,22 @@ export const serve_rendered = {
       // eslint-disable-next-line security/detect-object-injection -- s is loop counter from 1 to maxScaleFactor
       map.renderers[s] = createPool(s, 'tile', minPoolSize, maxPoolSize)
       // eslint-disable-next-line security/detect-object-injection -- s is loop counter from 1 to maxScaleFactor
-      map.renderersStatic[s] = createPool(
-        s,
-        'static',
-        minPoolSize,
-        maxPoolSize,
-      )
+      map.renderersStatic[s] = createPool(s, 'static', minPoolSize, maxPoolSize)
     }
 
     if (metricsModule) {
       map._metricsInterval = setInterval(() => {
         [map.renderers, map.renderersStatic].forEach((poolArr) => {
           poolArr.forEach((pool) => {
-            if (!pool) return
+            if (!pool) {
+              return
+            }
             try {
               const total = pool.size ?? 0
               const available = pool.available ?? 0
               metricsModule.renderPoolSize.set({ name: id }, total)
-              metricsModule.renderPoolActive.set(
-                { name: id },
-                total - available,
-              )
-              metricsModule.renderPoolWaiting.set(
-                { name: id },
-                pool.pending ?? 0,
-              )
+              metricsModule.renderPoolActive.set({ name: id }, total - available,)
+              metricsModule.renderPoolWaiting.set({ name: id }, pool.pending ?? 0,)
             } catch (_) {
               /* pool may be mid-teardown */
             }
@@ -1986,10 +1969,7 @@ export const serve_rendered = {
                 await new Promise((resolve) => {
                   source.close((err) => {
                     if (err) {
-                      console.warn(
-                        `Failed to close MBTiles source "${sourceId}" while clearing rendered repo entry "${id}":`,
-                        err,
-                      )
+                      console.warn(`Failed to close MBTiles source "${sourceId}" while clearing rendered repo entry "${id}":`, err,)
                     }
                     resolve()
                   })

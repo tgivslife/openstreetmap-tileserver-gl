@@ -45,28 +45,16 @@ class S3Source {
     // Log precedence decisions for debugging
     if (verbose >= 3) {
       console.log(`S3 config precedence for ${s3Url}:`)
-      console.log(
-        `  Profile: ${s3Profile ? 'config' : parsed.profile ? 'url' : 'default'} = ${profile || 'none'}`,
-      )
-      console.log(
-        `  Region: ${configRegion ? 'config' : parsed.region !== (process.env.AWS_REGION || 'us-east-1')
-          ? 'url'
-          : 'env/default'} = ${this.region}`,
-      )
-      console.log(
-        `  RequestPayer: ${configRequestPayer !== undefined ? 'config' : parsed.requestPayer
-          ? 'url'
-          : 'default'} = ${this.requestPayer}`,
-      )
+      console.log(`  Profile: ${s3Profile ? 'config' : parsed.profile ? 'url' : 'default'} = ${profile || 'none'}`,)
+      console.log(`  Region: ${configRegion ? 'config' : parsed.region !== (process.env.AWS_REGION || 'us-east-1')
+        ? 'url'
+        : 'env/default'} = ${this.region}`,)
+      console.log(`  RequestPayer: ${configRequestPayer !== undefined ? 'config' : parsed.requestPayer
+        ? 'url'
+        : 'default'} = ${this.requestPayer}`,)
     }
 
-    // Create S3 client
-    this.s3Client = this.createS3Client(
-      parsed.endpoint,
-      this.region,
-      profile,
-      this.verbose,
-    )
+    this.s3Client = this.createS3Client(parsed.endpoint, this.region, profile, this.verbose)
   }
 
   /**
@@ -79,9 +67,7 @@ class S3Source {
   parseS3Url (url, s3UrlFormat) {
     // Validate s3UrlFormat if provided
     if (s3UrlFormat && s3UrlFormat !== 'aws' && s3UrlFormat !== 'custom') {
-      console.warn(
-        `Invalid s3UrlFormat: "${s3UrlFormat}". Must be "aws" or "custom". Using auto-detection.`,
-      )
+      console.warn(`Invalid s3UrlFormat: "${s3UrlFormat}". Must be "aws" or "custom". Using auto-detection.`,)
       s3UrlFormat = undefined
     }
 
@@ -135,17 +121,25 @@ class S3Source {
 
     if (s3UrlFormat === 'custom') {
       match = cleanUrl.match(patterns.customForced)
-      if (match) return buildResult(match[1], match[2], match[3])
+      if (match) {
+        return buildResult(match[1], match[2], match[3])
+      }
     } else if (s3UrlFormat === 'aws') {
       match = cleanUrl.match(patterns.aws)
-      if (match) return buildResult(null, match[1], match[2])
+      if (match) {
+        return buildResult(null, match[1], match[2])
+      }
     } else {
       // Auto-detection: try custom (with dot) first, then AWS
       match = cleanUrl.match(patterns.customWithDot)
-      if (match) return buildResult(match[1], match[2], match[3])
+      if (match) {
+        return buildResult(match[1], match[2], match[3])
+      }
 
       match = cleanUrl.match(patterns.aws)
-      if (match) return buildResult(null, match[1], match[2])
+      if (match) {
+        return buildResult(null, match[1], match[2])
+      }
     }
 
     throw new Error(
@@ -236,7 +230,9 @@ class S3Source {
       }
 
       return {
-        data: arr.buffer,
+        // Slice to the view's own range: arr is a Uint8Array that may be a view into a larger pooled buffer,
+        // so arr.buffer alone could carry extra bytes and misparse the archive. Mirrors PMTilesFileSource.getBytes.
+        data: arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength),
         etag: response.ETag,
         expires: response.Expires?.toISOString(),
         cacheControl: response.CacheControl,
@@ -392,7 +388,6 @@ export function openPMtiles (
     s3UrlFormat,
   })
 
-  // Check if we already have a PMTiles object for this configuration
   if (pmtilesCache.has(cacheKey)) {
     if (verbose >= 2) {
       console.log(`Using cached PMTiles instance for: ${filePath}`)
@@ -446,6 +441,33 @@ export function clearPMtilesCache () {
     closePMTiles(pmtiles)
   }
   pmtilesCache.clear()
+}
+
+/**
+ * Whether an error represents throttling / transient overload that should be retried.
+ * S3 throttling surfaces as HTTP 503 "SlowDown" or a ThrottlingException (and S3-compatible stores vary),
+ * not only HTTP 429 — so match the SDK error name and status code as well as the message text, rather than just "429".
+ * @param {Error} error - The caught error (raw AWS SDK error or a wrapped one).
+ * @returns {boolean} - True if the request should be retried.
+ */
+function isThrottleError (error) {
+  if (!error) return false
+  const status = error.$metadata?.httpStatusCode
+  if (status === 429 || status === 503) return true
+  const name = error.name || error.Code || error.code
+  if (typeof name === 'string' &&
+    /^(SlowDown|Throttling|ThrottlingException|RequestThrottled|RequestThrottledException|TooManyRequestsException|ProvisionedThroughputExceededException|RequestLimitExceeded|BandwidthLimitExceeded|PriorityConsumerQuotaExceeded|ServiceUnavailable)$/.test(name)) {
+    return true
+  }
+  const msg = error.message || ''
+  return (
+    // Match 429/503 only where it reads as an HTTP status, not an arbitrary number that merely contains those digits
+    // (e.g. a byte-range like "bytes=429-1000"). The status-code/name checks above are the primary path.
+    /\b(?:http|status|code)\b[^0-9]{0,12}\b(?:429|503)\b/i.test(msg) ||
+    /\b(?:429|503)\b\s+(?:too many|slow ?down|service unavailable)/i.test(msg) ||
+    /Bad response code:\s*(?:429|503)/.test(msg) ||
+    /SlowDown|Throttl|TooManyRequests|Rate exceeded|ServiceUnavailable/i.test(msg)
+  )
 }
 
 /**
@@ -510,11 +532,7 @@ export async function getPMtilesInfo (pmtiles, inputFile, maxRetries = 3) {
     } catch (error) {
       lastError = error
 
-      if (
-        error.message &&
-        error.message.includes('429') &&
-        attempt < maxRetries - 1
-      ) {
+      if (isThrottleError(error) && attempt < maxRetries - 1) {
         const delay = Math.pow(2, attempt) * 1000
         console.warn(
           `Rate limited fetching metadata, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
@@ -523,8 +541,8 @@ export async function getPMtilesInfo (pmtiles, inputFile, maxRetries = 3) {
         continue
       }
 
-      // If not a 429 or last retry, throw immediately
-      if (!error.message?.includes('429') || attempt === maxRetries - 1) {
+      // Not throttling, or the last retry: throw immediately.
+      if (!isThrottleError(error) || attempt === maxRetries - 1) {
         const errorMessage = `${error.message} for file: ${inputFile}`
         throw new Error(errorMessage, { cause: error })
       }
@@ -532,9 +550,7 @@ export async function getPMtilesInfo (pmtiles, inputFile, maxRetries = 3) {
   }
 
   // This should never be reached, but just in case
-  throw new Error(
-    `Failed to get PMTiles info after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`,
-  )
+  throw new Error(`Failed to get PMTiles info after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`)
 }
 
 /**
@@ -547,11 +563,15 @@ export async function getPMtilesInfo (pmtiles, inputFile, maxRetries = 3) {
  * @returns {Promise<object>} - A promise that resolves to an object with data (Buffer or undefined) and header (content-type).
  */
 export async function getPMtilesTile (pmtiles, z, x, y, maxRetries = 3) {
-  const header = await pmtiles.getHeader()
-  const tileType = getPmtilesTileType(header.tileType)
+  // Declared outside the loop but fetched inside it, so a throttle on the header fetch is retried too (consistent with getPMtilesInfo).
+  // The PMTiles library caches the header after the first read, so re-calling it is a no-op on retry.
+  let tileType
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
+      const header = await pmtiles.getHeader()
+      tileType = getPmtilesTileType(header.tileType)
+
       let zxyTile = await pmtiles.getZxy(z, x, y)
 
       if (zxyTile && zxyTile.data) {
@@ -562,32 +582,24 @@ export async function getPMtilesTile (pmtiles, z, x, y, maxRetries = 3) {
 
       return { data: zxyTile, header: tileType.header }
     } catch (error) {
-      if (
-        error.message &&
-        error.message.includes('429') &&
-        attempt < maxRetries - 1
-      ) {
+      if (isThrottleError(error) && attempt < maxRetries - 1) {
         const delay = Math.pow(2, attempt) * 1000
-        console.warn(
-          `Rate limited for tile ${z}/${x}/${y}, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
-        )
+        console.warn(`Rate limited for tile ${z}/${x}/${y}, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,)
         await new Promise((resolve) => setTimeout(resolve, delay))
         continue
       }
 
       if (error.message && error.message.includes('Bad response code:')) {
         console.error(`HTTP error for tile ${z}/${x}/${y}: ${error.message}`)
-        return { data: undefined, header: tileType.header }
+        return { data: undefined, header: tileType?.header }
       }
 
       throw error
     }
   }
 
-  console.error(
-    `Failed to fetch tile ${z}/${x}/${y} after ${maxRetries} attempts`,
-  )
-  return { data: undefined, header: tileType.header }
+  console.error(`Failed to fetch tile ${z}/${x}/${y} after ${maxRetries} attempts`,)
+  return { data: undefined, header: tileType?.header }
 }
 
 /**

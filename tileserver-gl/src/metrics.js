@@ -1,4 +1,3 @@
-// src/metrics.js
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client'
 
 export const registry = new Registry()

@@ -53,32 +53,28 @@ if (args.length >= 3 && args[2][0] !== '-') {
   args.splice(2, 0, '--mbtiles')
 }
 
-program.description('tileserver-gl startup options').
-  usage('tileserver-gl [mbtiles] [options]').
-  option(
+program.description('tileserver-gl startup options')
+  .usage('tileserver-gl [mbtiles] [options]')
+  .option(
     '--file <file>',
     'MBTiles or PMTiles file (local path, http(s)://, or s3:// URL)\n' +
-    '\t                  ignored if the configuration file is also specified',
-  ).
-  option(
+    '\t                  ignored if the configuration file is also specified',)
+  .option(
     '--mbtiles <file>',
     '(DEPRECIATED) MBTiles file\n' +
     '\t                  ignored if file is also specified' +
-    '\t                  ignored if the configuration file is also specified',
-  ).
-  option(
+    '\t                  ignored if the configuration file is also specified',)
+  .option(
     '-c, --config <file>',
     'Configuration file [config.json]',
-    'config.json',
-  ).
-  option('-b, --bind <address>', 'Bind address').
-  option('-p, --port <port>', 'Port [8080]', 8080, parseInt).
-  option('-C|--no-cors', 'Disable Cross-origin resource sharing headers').
-  option(
+    'config.json',)
+  .option('-b, --bind <address>', 'Bind address')
+  .option('-p, --port <port>', 'Port [8080]', 8080, parseInt)
+  .option('-C|--no-cors', 'Disable Cross-origin resource sharing headers')
+  .option(
     '-u|--public_url <url>',
-    'Enable exposing the server on subpaths, not necessarily the root of the domain (env: PUBLIC_URL)',
-  ).
-  option(
+    'Enable exposing the server on subpaths, not necessarily the root of the domain (env: PUBLIC_URL)',)
+  .option(
     '-V, --verbose [level]',
     'More verbose output (level 1-3)\n' +
     '\t-V, --verbose, -V 1, or --verbose 1: Important operations\n' +
@@ -91,31 +87,27 @@ program.description('tileserver-gl startup options').
       const level = parseInt(value, 10)
       // Validate level is between 1-3
       return isNaN(level) ? 1 : Math.min(Math.max(level, 1), 3)
-    },
-  ).
-  option(
+    },)
+  .option(
     '--fetch-timeout <ms>',
     'External fetch timeout in milliseconds for renderer HTTP requests (default 15000)',
     (value) => {
       const v = parseInt(value, 10)
       return isNaN(v) ? 15000 : v
-    },
-  ).
-  option('-s, --silent', 'Less verbose output').
-  option('-l|--log_file <file>', 'output log file (defaults to standard out)').
-  option(
+    },)
+  .option('-s, --silent', 'Less verbose output')
+  .option('-l|--log_file <file>', 'output log file (defaults to standard out)')
+  .option(
     '-f|--log_format <format>',
-    'define the log format:  https://github.com/expressjs/morgan#morganformat-options',
-  ).
-  option(
+    'define the log format:  https://github.com/expressjs/morgan#morganformat-options',)
+  .option(
     '--ignore-missing-files',
-    'Continue startup even if configured mbtiles/pmtiles files are missing',
-  ).
-  option(
+    'Continue startup even if configured mbtiles/pmtiles files are missing',)
+  .option(
     '--metrics',
-    'Enable Prometheus metrics endpoint (env: TILESERVER_GL_METRICS)',
-  ).
-  version(packageJson.version, '-v, --version')
+    'Enable Prometheus metrics endpoint (env: TILESERVER_GL_METRICS)',)
+  .version(packageJson.version, '-v, --version')
+
 program.parse(process.argv)
 const opts = program.opts()
 
@@ -139,21 +131,11 @@ const startServer = (configPath, config) => {
     allowedHosts = String(process.env.TILESERVER_GL_ALLOWED_HOSTS).trim()
   }
   // Log warning if insecure defaults
-  if (
-    (allowedHosts === '*' ||
-      allowedHosts === '' ||
-      typeof allowedHosts === 'undefined') &&
-    !publicUrl
-  ) {
-    console.warn(
-      '[SECURITY WARNING] Host header poisoning mitigation is NOT enabled.',
-    )
-    console.warn(
-      '  Response URLs may be built from untrusted Host/X-Forwarded-* headers.',
-    )
-    console.warn(
-      '  For production, set --public_url / PUBLIC_URL, allowedHosts in config, or TILESERVER_GL_ALLOWED_HOSTS env.',
-    )
+  if ((allowedHosts === '*' || allowedHosts === '' || typeof allowedHosts === 'undefined')
+    && !publicUrl) {
+    console.warn('[SECURITY WARNING] Host header poisoning mitigation is NOT enabled.',)
+    console.warn('  Response URLs may be built from untrusted Host/X-Forwarded-* headers.',)
+    console.warn('  For production, set --public_url / PUBLIC_URL, allowedHosts in config, or TILESERVER_GL_ALLOWED_HOSTS env.',)
   }
   return server({
     configPath,
@@ -180,9 +162,7 @@ const startServer = (configPath, config) => {
 const startWithInputFile = async (inputFile) => {
   console.log(`[INFO] Automatically creating config file for ${inputFile}`)
   console.log(`[INFO] Only a basic preview style will be used.`)
-  console.log(
-    `[INFO] See documentation to learn how to create config.json file.`,
-  )
+  console.log(`[INFO] See documentation to learn how to create config.json file.`,)
 
   // Determine file type from prefix or extension
   let fileType = null
@@ -203,9 +183,7 @@ const startWithInputFile = async (inputFile) => {
 
   if (!fileType) {
     console.log(`ERROR: Unable to determine file type for "${inputFile}".`)
-    console.log(
-      `File must end with .pmtiles or .mbtiles, or use pmtiles:// or mbtiles:// prefix.`,
-    )
+    console.log(`File must end with .pmtiles or .mbtiles, or use pmtiles:// or mbtiles:// prefix.`,)
     process.exit(1)
   }
 
@@ -226,10 +204,7 @@ const startWithInputFile = async (inputFile) => {
   }
   console.log(`[INFO] Loading data source from: ${inputFile}`)
 
-  const styleDir = path.resolve(
-    __dirname,
-    '../node_modules/tileserver-gl-styles/',
-  )
+  const styleDir = path.resolve(__dirname, '../node_modules/tileserver-gl-styles/',)
 
   const config = {
     options: {
@@ -248,17 +223,17 @@ const startWithInputFile = async (inputFile) => {
   if (fileType === 'pmtiles') {
     const fileOpenInfo = openPMtiles(
       inputFile,
-      undefined,
-      undefined,
-      undefined,
+      undefined,    // s3Profile
+      undefined, // requestPayer
+      undefined,    // s3Region
+      undefined,  // s3UrlFormat
       opts.verbose,
     )
     const metadata = await getPMtilesInfo(fileOpenInfo, inputFile)
 
-    if (
-      metadata.format === 'pbf' &&
-      metadata.name.toLowerCase().indexOf('openmaptiles') > -1
-    ) {
+    if (metadata.format === 'pbf'
+      && typeof metadata.name === 'string'
+      && metadata.name.toLowerCase().indexOf('openmaptiles') > -1) {
       // Use inputFile directly for remote URLs (HTTP or S3)
       if (isValidRemoteUrl(inputFile)) {
         config['data'][`v3`] = {
@@ -285,9 +260,7 @@ const startWithInputFile = async (inputFile) => {
         }
       }
     } else {
-      console.log(
-        `WARN: PMTiles not in "openmaptiles" format. Serving raw data only...`,
-      )
+      console.log(`WARN: PMTiles not in "openmaptiles" format. Serving raw data only...`,)
       // Use inputFile directly for remote URLs (HTTP or S3)
       if (isValidRemoteUrl(inputFile)) {
         config['data'][(metadata.id || 'pmtiles').replace(/[?/:]/g, '_')] = {
@@ -310,9 +283,7 @@ const startWithInputFile = async (inputFile) => {
   } else if (fileType === 'mbtiles') {
     // MBTiles handling - reject remote URLs
     if (isValidRemoteUrl(inputFile)) {
-      console.log(
-        `ERROR: MBTiles does not support remote files. "${inputFile}" is not a valid data file.`,
-      )
+      console.log(`ERROR: MBTiles does not support remote files. "${inputFile}" is not a valid data file.`,)
       process.exit(1)
     }
     let info
@@ -327,13 +298,10 @@ const startWithInputFile = async (inputFile) => {
     }
     const bounds = info.bounds
 
-    if (
-      info.format === 'pbf' &&
-      info.name.toLowerCase().indexOf('openmaptiles') > -1
-    ) {
-      config['data'][`v3`] = {
-        mbtiles: path.basename(inputFile),
-      }
+    if (info.format === 'pbf'
+      && typeof info.name === 'string'
+      && info.name.toLowerCase().indexOf('openmaptiles') > -1) {
+      config['data'][`v3`] = { mbtiles: path.basename(inputFile), }
 
       const styles = await fsp.readdir(path.resolve(styleDir, 'styles'))
       for (const styleName of styles) {
@@ -350,9 +318,7 @@ const startWithInputFile = async (inputFile) => {
         }
       }
     } else {
-      console.log(
-        `WARN: MBTiles not in "openmaptiles" format. Serving raw data only...`,
-      )
+      console.log(`WARN: MBTiles not in "openmaptiles" format. Serving raw data only...`,)
       config['data'][(info.id || 'mbtiles').replace(/[?/:]/g, '_')] = {
         mbtiles: path.basename(inputFile),
       }
@@ -369,41 +335,42 @@ const startWithInputFile = async (inputFile) => {
 }
 
 fs.stat(path.resolve(opts.config), async (err, stats) => {
-  if (err || !stats.isFile() || stats.size === 0) {
-    let inputFile
-    if (opts.file) {
-      inputFile = opts.file
-    } else if (opts.mbtiles) {
-      inputFile = opts.mbtiles
-    }
+  // The global unhandledRejection handler deliberately does not exit, so a startup failure here would otherwise leave a live-but-not-listening process.
+  // Await the start calls and exit non-zero on any failure instead.
+  try {
+    if (err || !stats.isFile() || stats.size === 0) {
+      let inputFile
+      if (opts.file) {
+        inputFile = opts.file
+      } else if (opts.mbtiles) {
+        inputFile = opts.mbtiles
+      }
 
-    if (inputFile) {
-      return startWithInputFile(inputFile)
-    } else {
-      // try to find in the cwd
-      const files = await fsp.readdir(process.cwd())
-      for (const filename of files) {
-        if (filename.endsWith('.mbtiles') || filename.endsWith('.pmtiles')) {
-          const inputFilesStats = await fsp.stat(filename)
-          if (inputFilesStats.isFile() && inputFilesStats.size > 0) {
-            inputFile = filename
-            break
+      if (inputFile) {
+        return await startWithInputFile(inputFile)
+      } else {
+        // try to find in the cwd
+        const files = await fsp.readdir(process.cwd())
+        for (const filename of files) {
+          if (filename.endsWith('.mbtiles') || filename.endsWith('.pmtiles')) {
+            const inputFilesStats = await fsp.stat(filename)
+            if (inputFilesStats.isFile() && inputFilesStats.size > 0) {
+              inputFile = filename
+              break
+            }
           }
         }
-      }
-      if (inputFile) {
-        console.log(`No input file specified, using ${inputFile}`)
-        return startWithInputFile(inputFile)
-      } else {
-        const url =
-          'https://github.com/maptiler/tileserver-gl/releases/download/v1.3.0/zurich_switzerland.mbtiles'
-        const filename = 'zurich_switzerland.mbtiles'
+        if (inputFile) {
+          console.log(`No input file specified, using ${inputFile}`)
+          return await startWithInputFile(inputFile)
+        } else {
+          const url = 'https://github.com/maptiler/tileserver-gl/releases/download/v1.3.0/zurich_switzerland.mbtiles'
+          const filename = 'zurich_switzerland.mbtiles'
 
-        const writer = fs.createWriteStream(filename)
-        console.log(`No input file found`)
-        console.log(`[DEMO] Downloading sample data (${filename}) from ${url}`)
+          const writer = fs.createWriteStream(filename)
+          console.log(`No input file found`)
+          console.log(`[DEMO] Downloading sample data (${filename}) from ${url}`)
 
-        try {
           const response = await fetch(url)
 
           if (!response.ok) {
@@ -415,14 +382,15 @@ fs.stat(path.resolve(opts.config), async (err, stats) => {
           await pipeline(nodeStream, writer)
 
           console.log('Download complete')
-          startWithInputFile(filename)
-        } catch (error) {
-          console.error(`Error downloading file: ${error.message || error}`)
+          return await startWithInputFile(filename)
         }
       }
+    } else {
+      console.log(`Using specified config file from ${opts.config}`)
+      return await startServer(opts.config, null)
     }
-  } else {
-    console.log(`Using specified config file from ${opts.config}`)
-    return startServer(opts.config, null)
+  } catch (error) {
+    console.error('Fatal error during startup:', error && error.stack ? error.stack : error,)
+    process.exit(1)
   }
 })

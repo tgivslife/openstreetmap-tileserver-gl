@@ -120,13 +120,11 @@ const drawMarker = (ctx, marker, z) => {
       // the image in relation to the provided location
       let xCoordinate = pixelCoords[0] - imageWidth / 2
 
-      // Subtract the image's height from the y-coordinate to place it above
-      // the provided location
+      // Subtract the image's height from the y-coordinate to place it above the provided location
       let yCoordinate = pixelCoords[1] - imageHeight
 
-      // Since image placement is dependent on the size, offsets have to be
-      // scaled as well. Additionally offsets are provided as either positive or
-      // negative values so we always add them
+      // Since image placement is dependent on the size, offsets have to be scaled as well.
+      // Additionally offsets are provided as either positive or negative values so we always add them
       if (marker.offsetX) {
         xCoordinate = xCoordinate + marker.offsetX * scale
       }

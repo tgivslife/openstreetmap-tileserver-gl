@@ -6,3 +6,19 @@
 !package-lock.json
 !docker-entrypoint.sh
 **.gitignore
+
+# The browser bundles below are generated into public/resources by the `prepare`
+# lifecycle script during the in-image `npm ci`/`npm install`. Excluding them here
+# keeps `COPY .` from overwriting the builder's freshly-built copies with a
+# developer's stale local ones (which are not tracked in git).
+public/resources/maplibre-gl.js
+public/resources/maplibre-gl.js.map
+public/resources/maplibre-gl.css
+public/resources/maplibre-gl-inspect.js
+public/resources/maplibre-gl-inspect.js.map
+public/resources/maplibre-gl-inspect.css
+public/resources/mapbox-gl-rtl-text.js
+public/resources/leaflet.js
+public/resources/leaflet.js.map
+public/resources/leaflet.css
+public/resources/leaflet-hash.js

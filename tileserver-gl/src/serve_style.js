@@ -14,6 +14,7 @@ import {
   isValidHttpUrl,
   readFile,
   setCacheControl,
+  setHostDerivedCacheControl,
 } from './utils.js'
 import { gzipP } from './promises.js'
 
@@ -47,17 +48,14 @@ export const serve_style = {
 
     /**
      * Builds the style document for a request, with the local:// URLs resolved.
-     * Only the fields that get rewritten are copied — `layers` is never
-     * mutated, so it is shared with the cached original rather than cloned.
+     * Only the fields that get rewritten are copied — `layers` is never mutated, so it is shared with the cached original rather than cloned.
      * @param {object} item - Repository entry for the style.
      * @param {express.Request} req - Express request object.
      * @returns {object} - The style document to serve.
      */
     const buildStyle = (item, req) => {
-      const styleJSON_ = {
-        ...item.styleJSON,
-        sources: clone(item.styleJSON.sources),
-      }
+      const styleJSON_ = { ...item.styleJSON, sources: clone(item.styleJSON.sources), }
+
       for (const name of Object.keys(styleJSON_.sources)) {
         // eslint-disable-next-line security/detect-object-injection -- name is from Object.keys of style sources
         const source = styleJSON_.sources[name]
@@ -71,29 +69,14 @@ export const serve_style = {
           // Entries get their .url reassigned, so these objects do need copying.
           styleJSON_.sprite = clone(styleJSON_.sprite)
           styleJSON_.sprite.forEach((spriteItem) => {
-            spriteItem.url = fixUrl(
-              req,
-              spriteItem.url,
-              item.publicUrl,
-              allowedHosts,
-            )
+            spriteItem.url = fixUrl(req, spriteItem.url, item.publicUrl, allowedHosts,)
           })
         } else {
-          styleJSON_.sprite = fixUrl(
-            req,
-            styleJSON_.sprite,
-            item.publicUrl,
-            allowedHosts,
-          )
+          styleJSON_.sprite = fixUrl(req, styleJSON_.sprite, item.publicUrl, allowedHosts,)
         }
       }
       if (styleJSON_.glyphs) {
-        styleJSON_.glyphs = fixUrl(
-          req,
-          styleJSON_.glyphs,
-          item.publicUrl,
-          allowedHosts,
-        )
+        styleJSON_.glyphs = fixUrl(req, styleJSON_.glyphs, item.publicUrl, allowedHosts,)
       }
       return styleJSON_
     }
@@ -109,8 +92,7 @@ export const serve_style = {
     app.get('/:id/style.json', async (req, res, next) => {
       const { id } = req.params
       if (verbose >= 1) {
-        console.log(
-          'Handling style request for: /styles/%s/style.json',
+        console.log('Handling style request for: /styles/%s/style.json',
           String(id).replace(/\n|\r/g, ''),
         )
       }
@@ -121,9 +103,8 @@ export const serve_style = {
           return res.sendStatus(404)
         }
 
-        // Everything that varies the output: the public URL base (derived from
-        // publicUrl, or from the request host when it is not set) and the key
-        // that fixUrl appends to each rewritten URL.
+        // Everything that varies the output: the public URL base (derived from publicUrl, or from the request host when it is not set)
+        // and the key that fixUrl appends to each rewritten URL.
         const base = getPublicUrl(item.publicUrl, req, allowedHosts)
         const key = typeof req.query.key === 'string' ? req.query.key : ''
         const cacheKey = `${base}\u0000${key}`
@@ -150,9 +131,14 @@ export const serve_style = {
         }
 
         res.set('Content-Type', 'application/json; charset=utf-8')
-        setCacheControl(res, options, 'metadata')
-        // RFC 7231 §5.3.4: a missing Accept-Encoding means any encoding is
-        // acceptable. Only an explicit header excluding gzip forces identity.
+        setHostDerivedCacheControl(res, options, 'metadata', {
+          publicUrl: item.publicUrl,
+          allowedHosts,
+        })
+        // The Content-Encoding below is chosen from Accept-Encoding, so a shared cache must key on it (RFC 9110 §12.5.5)
+        // or it could hand the gzip body to a client that did not ask for one. Appends to the Vary already set.
+        res.vary('Accept-Encoding')
+        // RFC 7231 §5.3.4: a missing Accept-Encoding means any encoding is acceptable. Only an explicit header excluding gzip forces identity.
         if (
           req.headers['accept-encoding'] === undefined ||
           req.acceptsEncodings('gzip') === 'gzip'
@@ -177,8 +163,7 @@ export const serve_style = {
      * @param {string} req.params.format - Format of the sprite file, 'png' or 'json'.
      * @returns {Promise<void>}
      */
-    app.get(
-      `/:id/sprite{/:spriteID}{@:scale}{.:format}`,
+    app.get(`/:id/sprite{/:spriteID}{@:scale}{.:format}`,
       async (req, res, next) => {
         const { spriteID = 'default', id, format, scale } = req.params
         const sanitizedId = String(id).replace(/\n|\r/g, '')
@@ -188,8 +173,7 @@ export const serve_style = {
           ? '.' + String(format).replace(/\n|\r/g, '')
           : ''
         if (verbose >= 1) {
-          console.log(
-            `Handling sprite request for: /styles/%s/sprite/%s%s%s`,
+          console.log(`Handling sprite request for: /styles/%s/sprite/%s%s%s`,
             sanitizedId,
             sanitizedSpriteID,
             sanitizedScale,
@@ -201,8 +185,7 @@ export const serve_style = {
         const validatedFormat = allowedSpriteFormats(format)
         if (!item || !validatedFormat) {
           if (verbose >= 1)
-            console.error(
-              `Sprite item or format not found for: /styles/%s/sprite/%s%s%s`,
+            console.error(`Sprite item or format not found for: /styles/%s/sprite/%s%s%s`,
               sanitizedId,
               sanitizedSpriteID,
               sanitizedScale,
@@ -210,14 +193,11 @@ export const serve_style = {
             )
           return res.sendStatus(404)
         }
-        const sprite = item.spritePaths.find(
-          (sprite) => sprite.id === spriteID,
-        )
+        const sprite = item.spritePaths.find((sprite) => sprite.id === spriteID,)
         const spriteScale = allowedSpriteScales(scale)
         if (!sprite || spriteScale === null) {
           if (verbose >= 1)
-            console.error(
-              `Bad Sprite ID or Scale for: /styles/%s/sprite/%s%s%s`,
+            console.error(`Bad Sprite ID or Scale for: /styles/%s/sprite/%s%s%s`,
               sanitizedId,
               sanitizedSpriteID,
               sanitizedScale,
@@ -239,7 +219,9 @@ export const serve_style = {
 
         const sanitizedSpritePath = sprite.path.replace(/^(\.\.\/)+/, '')
         const filename = `${sanitizedSpritePath}${spriteScale}.${validatedFormat}`
-        if (verbose >= 1) console.log(`Loading sprite from: %s`, filename)
+        if (verbose >= 1) {
+          console.log(`Loading sprite from: %s`, filename)
+        }
         try {
           const data = await readFile(filename)
 
@@ -249,8 +231,7 @@ export const serve_style = {
             res.header('Content-type', 'image/png')
           }
           if (verbose >= 1)
-            console.log(
-              `Responding with sprite data for /styles/%s/sprite/%s%s%s`,
+            console.log(`Responding with sprite data for /styles/%s/sprite/%s%s%s`,
               sanitizedId,
               sanitizedSpriteID,
               sanitizedScale,
@@ -261,11 +242,7 @@ export const serve_style = {
           return res.send(data)
         } catch (err) {
           if (verbose >= 1) {
-            console.error(
-              'Sprite load error: %s, Error: %s',
-              filename,
-              String(err),
-            )
+            console.error('Sprite load error: %s, Error: %s', filename, String(err),)
           }
           return res.sendStatus(404)
         }
@@ -349,10 +326,7 @@ export const serve_style = {
       // eslint-disable-next-line security/detect-object-injection -- name is from Object.keys of style sources
       const source = styleJSON.sources[name]
       let url = source.url
-      if (
-        url &&
-        (url.startsWith('pmtiles://') || url.startsWith('mbtiles://'))
-      ) {
+      if (url && (url.startsWith('pmtiles://') || url.startsWith('mbtiles://'))) {
         const protocol = url.split(':')[0]
 
         let dataId = url.replace('pmtiles://', '').replace('mbtiles://', '')
@@ -377,8 +351,7 @@ export const serve_style = {
 
       let data = source.data
       if (data && typeof data == 'string' && data.startsWith('file://')) {
-        source.data =
-          'local://files' +
+        source.data = 'local://files' +
           path.resolve(
             '/',
             data.replace('file://', '').replace(options.paths.files, ''),
@@ -389,14 +362,9 @@ export const serve_style = {
     // Check if any sources are missing after processing all of them
     if (missingSources.length > 0) {
       if (ignoreMissingFiles) {
-        console.log(
-          `WARN: Style '${id}' references ${missingSources.length} missing data source(s): [${missingSources.join(
-            ', ')}] - not adding style`,
-        )
+        console.log(`WARN: Style '${id}' references ${missingSources.length} missing data source(s): [${missingSources.join(', ')}] - not adding style`,)
       } else {
-        console.log(
-          `ERROR: Style '${id}' references missing data source(s): [${missingSources.join(', ')}]`,
-        )
+        console.log(`ERROR: Style '${id}' references missing data source(s): [${missingSources.join(', ')}]`,)
       }
       return false
     }

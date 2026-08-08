@@ -82,7 +82,10 @@ export function fixUrl (req, url, publicUrl, allowedHosts) {
     return url
   }
   const queryParams = []
-  if (req.query.key) {
+  // Only a non-empty string key is embedded, matching the style cache key in serve_style.
+  // A repeated ?key=a&key=b parses to an array; treating it as a key here (Array→"a,b") while the cache key treats it
+  // as absent would poison the keyless cache entry with a stray ?key=a%2Cb.
+  if (typeof req.query.key === 'string' && req.query.key !== '') {
     queryParams.unshift(`key=${encodeURIComponent(req.query.key)}`)
   }
   let query = ''
@@ -100,7 +103,9 @@ export function fixUrl (req, url, publicUrl, allowedHosts) {
  * @returns {string} - Host string with port removed.
  */
 function stripPort (host) {
-  if (!host || typeof host !== 'string') return host
+  if (!host || typeof host !== 'string') {
+    return host
+  }
   if (host.startsWith('[')) {
     const i = host.indexOf(']:')
     return i > 0 ? host.slice(0, i + 1) : host
@@ -165,24 +170,34 @@ const BAD_HOST_RE = /[\s/]/
  */
 export function getCandidateHost (req) {
   const check = (raw) => {
-    if (!raw || typeof raw !== 'string') return undefined
+    if (!raw || typeof raw !== 'string') {
+      return undefined
+    }
     const s = raw.split(',')[0].trim()
-    if (BAD_HOST_RE.test(s)) return undefined
+    if (BAD_HOST_RE.test(s)) {
+      return undefined
+    }
     return s
   }
   const forwarded = req.get && req.get('X-Forwarded-Host')
   if (forwarded) {
     const v = check(forwarded)
-    if (v !== undefined) return v
+    if (v !== undefined) {
+      return v
+    }
   }
   const host = req.get && req.get('host')
   if (host) {
     const v = check(host)
-    if (v !== undefined) return v
+    if (v !== undefined) {
+      return v
+    }
   }
   if (req.hostname) {
     const v = check(req.hostname)
-    if (v !== undefined) return v
+    if (v !== undefined) {
+      return v
+    }
   }
   return undefined
 }
@@ -194,10 +209,7 @@ export function getCandidateHost (req) {
  */
 export function getSafeProtocol (req) {
   const get = req.get && req.get.bind(req)
-  const proto =
-    (get && (get('X-Forwarded-Protocol') || get('X-Forwarded-Proto'))) ||
-    req.protocol ||
-    'http'
+  const proto = (get && (get('X-Forwarded-Protocol') || get('X-Forwarded-Proto'))) || req.protocol || 'http'
   const p = (typeof proto === 'string' ? proto : '').toLowerCase()
   return p === 'https' ? 'https' : 'http'
 }
@@ -208,7 +220,9 @@ export function getSafeProtocol (req) {
  * @returns {URL} - URL object with correct host and optionally path.
  */
 function getUrlObject (req) {
-  const urlObject = new URL(`${req.protocol}://${req.headers.host}/`)
+  // getSafeProtocol clamps X-Forwarded-Proto/req.protocol to http|https so a header like `X-Forwarded-Proto: javascript`
+  // cannot inject a scheme into the absolute URLs reflected into style.json / TileJSON bodies.
+  const urlObject = new URL(`${getSafeProtocol(req)}://${req.headers.host}/`)
   // support overriding hostname by sending X-Forwarded-Host http header
   urlObject.hostname = req.hostname
 
@@ -248,9 +262,7 @@ export function getPublicUrl (publicUrl, req, allowedHosts) {
   const candidateHost = getCandidateHost(req)
   if (!isHostAllowed(candidateHost, parsed)) {
     const xForwardedPath = req.get && req.get('X-Forwarded-Path')
-    const prefix = xForwardedPath
-      ? `/${xForwardedPath.replace(/^\/+/, '')}`
-      : ''
+    const prefix = xForwardedPath ? `/${xForwardedPath.replace(/^\/+/, '')}` : ''
     return prefix ? (prefix.endsWith('/') ? prefix : `${prefix}/`) : '/'
   }
   return getUrlObject(req).toString()
@@ -290,9 +302,7 @@ export function getTileUrls (
       domains = domains.split(',')
     }
     const hostParts = urlObject.host.split('.')
-    const relativeSubdomainsUsable =
-      hostParts.length > 1 &&
-      !/^([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?$/.test(urlObject.host)
+    const relativeSubdomainsUsable = hostParts.length > 1 && !/^([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?$/.test(urlObject.host)
     const newDomains = []
     for (const domain of domains) {
       if (domain.indexOf('*') !== -1) {
@@ -307,15 +317,17 @@ export function getTileUrls (
     }
     domains = newDomains
   }
-  if (!domains || domains.length == 0) {
+  if (!domains || domains.length === 0) {
     domains = [urlObject.host]
   }
 
   const queryParams = []
-  if (req.query.key) {
+  // Embed only non-empty string values; a repeated param parses to an array,
+  // which would otherwise be reflected as "a,b" (see fixUrl).
+  if (typeof req.query.key === 'string' && req.query.key !== '') {
     queryParams.push(`key=${encodeURIComponent(req.query.key)}`)
   }
-  if (req.query.style) {
+  if (typeof req.query.style === 'string' && req.query.style !== '') {
     queryParams.push(`style=${encodeURIComponent(req.query.style)}`)
   }
   const query = queryParams.length > 0 ? `?${queryParams.join('&')}` : ''
@@ -331,7 +343,7 @@ export function getTileUrls (
     tileParams = `${tileSize}/{z}/{x}/{y}`
   }
 
-  if (format && format != '') {
+  if (format && format !== '') {
     format = `.${format}`
   } else {
     format = ''
@@ -345,15 +357,11 @@ export function getTileUrls (
       uris.push(`${xForwardedPath}/${path}/${tileParams}${format}${query}`)
     } else {
       for (const domain of domains) {
-        uris.push(
-          `${safeProtocol}://${domain}${xForwardedPath}/${path}/${tileParams}${format}${query}`,
-        )
+        uris.push(`${safeProtocol}://${domain}${xForwardedPath}/${path}/${tileParams}${format}${query}`,)
       }
     }
   } else {
-    uris.push(
-      `${getPublicUrl(publicUrl, req, allowedHosts)}${path}/${tileParams}${format}${query}`,
-    )
+    uris.push(`${getPublicUrl(publicUrl, req, allowedHosts)}${path}/${tileParams}${format}${query}`,)
   }
 
   return uris
@@ -371,10 +379,7 @@ export function fixTileJSONCenter (tileJSON) {
     tileJSON.center = [
       (tileJSON.bounds[0] + tileJSON.bounds[2]) / 2,
       (tileJSON.bounds[1] + tileJSON.bounds[3]) / 2,
-      Math.round(
-        -Math.log((tileJSON.bounds[2] - tileJSON.bounds[0]) / 360 / tiles) /
-        Math.LN2,
-      ),
+      Math.round(-Math.log((tileJSON.bounds[2] - tileJSON.bounds[0]) / 360 / tiles) / Math.LN2,),
     ]
   }
 }
@@ -413,8 +418,7 @@ async function getFontPbf (allowedFonts, fontPath, name, range, fallbacks) {
     const fontMatch = name?.match(/^[\p{L}\p{N} \-_.~!*'()@&=+,#$[\]]+$/u)
     const sanitizedName = fontMatch?.[0] || 'invalid'
     if (!name || typeof name !== 'string' || name.trim() === '' || !fontMatch) {
-      console.error(
-        'ERROR: Invalid font name: %s',
+      console.error('ERROR: Invalid font name: %s',
         sanitizedName.replace(/\n|\r/g, ''),
       )
       throw new Error('Invalid font name')
@@ -423,17 +427,21 @@ async function getFontPbf (allowedFonts, fontPath, name, range, fallbacks) {
     const rangeMatch = range?.match(/^[\d-]+$/)
     const sanitizedRange = rangeMatch?.[0] || 'invalid'
     if (!/^\d+-\d+$/.test(range)) {
-      console.error(
-        'ERROR: Invalid range: %s',
+      console.error('ERROR: Invalid range: %s',
         sanitizedRange.replace(/\n|\r/g, ''),
       )
       throw new Error('Invalid range')
     }
-    const filename = path.join(
-      fontPath,
-      sanitizedName,
-      `${sanitizedRange}.pbf`,
-    )
+    const filename = path.join(fontPath, sanitizedName, `${sanitizedRange}.pbf`,)
+
+    // The charset above permits ".", so a fontstack of ".." (or any ".." segment) makes path.join climb out of the fonts directory.
+    // "/" and "\" are rejected so only a lone ".." can traverse, but verify containment explicitly rather than rely on the regex.
+    const fontRoot = path.resolve(fontPath)
+    const resolved = path.resolve(filename)
+    if (resolved !== fontRoot && !resolved.startsWith(fontRoot + path.sep)) {
+      console.error('ERROR: Invalid font name: %s', sanitizedName.replace(/\n|\r/g, ''),)
+      throw new Error('Invalid font name')
+    }
 
     if (!fallbacks) {
       fallbacks = clone(allowedFonts || {})
@@ -442,11 +450,9 @@ async function getFontPbf (allowedFonts, fontPath, name, range, fallbacks) {
     delete fallbacks[name]
 
     try {
-      const data = await readFile(filename)
-      return data
+      return await readFile(filename)
     } catch (err) {
-      console.error(
-        'ERROR: Font not found: %s, Error: %s',
+      console.error('ERROR: Font not found: %s, Error: %s',
         filename.replace(/\n|\r/g, ''),
         String(err),
       )
@@ -466,11 +472,7 @@ async function getFontPbf (allowedFonts, fontPath, name, range, fallbacks) {
             fallbackName = Object.keys(fallbacks)[0]
           }
         }
-        console.error(
-          `ERROR: Trying to use %s as a fallback for: %s`,
-          fallbackName,
-          sanitizedName,
-        )
+        console.error(`ERROR: Trying to use %s as a fallback for: %s`, fallbackName, sanitizedName,)
         // eslint-disable-next-line security/detect-object-injection -- fallbackName is constructed from validated font style
         delete fallbacks[fallbackName]
         return getFontPbf(null, fontPath, fallbackName, range, fallbacks)
@@ -503,13 +505,7 @@ export async function getFontsPbf (
   const queue = []
   for (const font of fonts) {
     queue.push(
-      getFontPbf(
-        allowedFonts,
-        fontPath,
-        font,
-        range,
-        clone(allowedFonts || fallbacks),
-      ),
+      getFontPbf(allowedFonts, fontPath, font, range, clone(allowedFonts || fallbacks),),
     )
   }
 
@@ -528,10 +524,7 @@ export async function listFonts (fontPath) {
   const files = await fsPromises.readdir(fontPath)
   for (const file of files) {
     const stats = await fsPromises.stat(path.join(fontPath, file))
-    if (
-      stats.isDirectory() &&
-      (await existsP(path.join(fontPath, file, '0-255.pbf')))
-    ) {
+    if (stats.isDirectory() && (await existsP(path.join(fontPath, file, '0-255.pbf')))) {
       existingFonts[path.basename(file)] = true
     }
   }
@@ -623,8 +616,7 @@ export function lonLatToTilePixel (lon, lat, zoom, tileSize) {
   siny = Math.min(Math.max(siny, -0.9999), 0.9999)
 
   const xWorld = tileSize * (0.5 + lon / 360)
-  const yWorld =
-    tileSize * (0.5 - Math.log((1 + siny) / (1 - siny)) / (4 * Math.PI))
+  const yWorld = tileSize * (0.5 - Math.log((1 + siny) / (1 - siny)) / (4 * Math.PI))
 
   const scale = 1 << zoom
 
@@ -649,9 +641,11 @@ export function lonLatToTilePixel (lon, lat, zoom, tileSize) {
 export async function fetchTileData (source, sourceType, z, x, y) {
   if (sourceType === 'pmtiles') {
     try {
-      const tileinfo = await getPMtilesTile(source, z, x, y)
-      if (!tileinfo?.data) return null
-      return { data: tileinfo.data, headers: tileinfo.header }
+      const tileInfo = await getPMtilesTile(source, z, x, y)
+      if (!tileInfo?.data) {
+        return null
+      }
+      return { data: tileInfo.data, headers: tileInfo.header }
     } catch (error) {
       console.error('Error fetching PMTiles tile:', error)
       return null
@@ -720,6 +714,69 @@ export function getCacheControl (options, category) {
  */
 export function setCacheControl (res, options, category) {
   const value = getCacheControl(options, category)
+  if (value) {
+    res.set('Cache-Control', value)
+  }
+}
+
+/**
+ * Request headers that change the absolute URLs embedded in a host-derived
+ * response body (the tile/sprite/glyph links in style.json and TileJSON). A
+ * shared cache keys on the URL alone, so unless it also keys on these headers a
+ * response built from an attacker's X-Forwarded-* values can be stored under the
+ * plain URL and served to every other client — redirecting their map (and
+ * `?key=`) traffic to an attacker host.
+ */
+const HOST_DERIVED_VARY = [
+  'X-Forwarded-Host',
+  'X-Forwarded-Proto',
+  'X-Forwarded-Protocol',
+  'X-Forwarded-Port',
+  'X-Forwarded-Path',
+]
+
+/**
+ * Whether the public URLs embedded in a response are pinned to server config rather than derived from mutable request headers.
+ * Pinned when an explicit publicUrl is configured, or when allowedHosts restricts the reflected host to a known allowlist (so it cannot be attacker-chosen).
+ * @param {string} [publicUrl] - Configured public URL, if any.
+ * @param {string|string[]} [allowedHosts] - allowedHosts config.
+ * @returns {boolean} - True when the embedded host is not attacker-controllable.
+ */
+function hostUrlsArePinned (publicUrl, allowedHosts) {
+  if (publicUrl) {
+    return true
+  }
+  return parseAllowedHosts(allowedHosts) !== '*'
+}
+
+/**
+ * Sets Cache-Control for a response whose body embeds request-host-derived absolute URLs.
+ * Always adds a Vary on the forwarded headers so a compliant shared cache keys on them; and when the reflected host is
+ * attacker-controllable (no publicUrl and allowedHosts is the default "*"), downgrades a shared-cacheable directive to
+ * `private` so a shared cache cannot serve one client's (or an attacker's) host back to another.
+ * Configuring publicUrl or TILESERVER_GL_ALLOWED_HOSTS pins the host and restores public caching.
+ * @param {object} res - Express response object.
+ * @param {object} options - The `options` block from the config file.
+ * @param {string} category - Cache-Control category (e.g. 'metadata').
+ * @param {object} [ctx] - Host-pinning context.
+ * @param {string} [ctx.publicUrl] - Configured public URL, if any.
+ * @param {string|string[]} [ctx.allowedHosts] - allowedHosts config.
+ * @returns {void}
+ */
+export function setHostDerivedCacheControl (
+  res,
+  options,
+  category,
+  { publicUrl, allowedHosts } = {},
+) {
+  res.vary(HOST_DERIVED_VARY)
+  let value = getCacheControl(options, category)
+  if (value && !hostUrlsArePinned(publicUrl, allowedHosts)) {
+    value = value.replace(/\bpublic\b/g, 'private')
+    if (!/\b(private|no-store)\b/.test(value)) {
+      value = `private, ${value}`
+    }
+  }
   if (value) {
     res.set('Cache-Control', value)
   }

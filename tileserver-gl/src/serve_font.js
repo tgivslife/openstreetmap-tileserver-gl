@@ -38,17 +38,20 @@ export async function serve_font (options, allowedFonts, programOpts) {
    */
   app.get('/fonts/:fontstack/:range.pbf', async (req, res) => {
     const sRange = String(req.params.range).replace(/\n|\r/g, '')
-    const sFontStack = String(decodeURI(req.params.fontstack)).replace(
-      /\n|\r/g,
-      '',
-    )
+    // decodeURI throws URIError on a malformed percent-encoding (e.g. a request of /fonts/%25/... leaves req.params.fontstack as '%').
+    // Guard it so that is a clean 400 rather than an uncaught rejection surfacing as a generic 500.
+    let sFontStack
+    try {
+      sFontStack = String(decodeURI(req.params.fontstack)).replace(/\n|\r/g, '')
+    } catch {
+      return res
+        .status(400)
+        .header('Content-Type', 'text/plain')
+        .send('Error serving font')
+    }
 
     if (verbose >= 1) {
-      console.log(
-        `Handling font request for: /fonts/%s/%s.pbf`,
-        sFontStack,
-        sRange,
-      )
+      console.log(`Handling font request for: /fonts/%s/%s.pbf`, sFontStack, sRange,)
     }
 
     const modifiedSince = req.get('if-modified-since')
@@ -59,6 +62,24 @@ export async function serve_font (options, allowedFonts, programOpts) {
       ) {
         return res.sendStatus(304)
       }
+    }
+
+    // Glyph PBFs only cover the Basic Multilingual Plane: codepoints 0-65535, in 256-wide blocks.
+    // A request beyond that — e.g. the U+E0100 variation selectors some labels carry (range 917760-918015) — cannot exist for any font.
+    // Answer it directly instead of ENOENT-cascading through every fallback font, which floods the log with dozens of errors before failing anyway.
+    const rangeStart = Number(sRange.split('-')[0])
+    if (Number.isFinite(rangeStart) && rangeStart > 65535) {
+      if (verbose >= 1) {
+        console.log(
+          'Skipping out-of-range glyph request: /fonts/%s/%s.pbf',
+          sFontStack,
+          sRange,
+        )
+      }
+      return res
+        .status(404)
+        .header('Content-Type', 'text/plain')
+        .send('Glyph range out of range')
     }
 
     try {
@@ -77,12 +98,7 @@ export async function serve_font (options, allowedFonts, programOpts) {
       }
       return res.send(concatenated)
     } catch (err) {
-      console.error(
-        `Error serving font: %s/%s.pbf, Error: %s`,
-        sFontStack,
-        sRange,
-        String(err),
-      )
+      console.error(`Error serving font: %s/%s.pbf, Error: %s`, sFontStack, sRange, String(err),)
       return res.status(400).header('Content-Type', 'text/plain').send('Error serving font')
     }
   })
