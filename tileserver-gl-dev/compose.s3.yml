@@ -97,6 +97,13 @@ services:
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       AWS_REGION: us-east-1
+      # S3 client connection pool (optional; defaults shown). The AWS SDK caps
+      # concurrent connections at 50 sockets by default — raise max-sockets for
+      # more parallel tile range-GETs under load.
+      # TILESERVER_GL_S3_MAX_SOCKETS: "256"
+      # TILESERVER_GL_S3_KEEP_ALIVE: "true"
+      # TILESERVER_GL_S3_CONNECTION_TIMEOUT_MS: "5000"
+      # TILESERVER_GL_S3_REQUEST_TIMEOUT_MS: "5000"   # 0 = no request timeout
       # The baked config.json reads PMTILES_URL (falling back to this MinIO URL if unset).
       # For real AWS you'd set e.g. s3://my-bucket/planet.pmtiles here — same image, no rebuild.
       PMTILES_URL: s3+http://minio:9000/tiles/planet.pmtiles

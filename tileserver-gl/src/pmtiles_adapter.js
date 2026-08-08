@@ -1,8 +1,37 @@
 import fs from 'node:fs'
+import http from 'node:http'
+import https from 'node:https'
 import { EtagMismatch, FetchSource, PMTiles } from 'pmtiles'
 import { isS3Url, isValidHttpUrl } from './utils.js'
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { fromIni } from '@aws-sdk/credential-provider-ini'
+
+/**
+ * Reads a positive-integer env var, falling back to a default.
+ * `min` guards the lower bound (timeouts allow 0 to disable; socket counts require >= 1).
+ * @param {string} name - Environment variable name.
+ * @param {number} def - Default when unset or invalid.
+ * @param {number} [min] - Minimum accepted value.
+ * @returns {number} - Parsed value or the default.
+ */
+function intEnv (name, def, min = 1) {
+  // eslint-disable-next-line security/detect-object-injection -- name is an internal literal
+  const v = parseInt(process.env[name], 10)
+  return Number.isFinite(v) && v >= min ? v : def
+}
+
+/**
+ * Reads a boolean env var (false/0/no/off => false), falling back to a default.
+ * @param {string} name - Environment variable name.
+ * @param {boolean} def - Default when unset or empty.
+ * @returns {boolean} - Parsed boolean.
+ */
+function boolEnv (name, def) {
+  // eslint-disable-next-line security/detect-object-injection -- name is an internal literal
+  const v = process.env[name]
+  if (v === undefined || v === '') return def
+  return !/^(false|0|no|off)$/i.test(v.trim())
+}
 
 /**
  * S3 Source for PMTiles
@@ -160,11 +189,32 @@ class S3Source {
    * @returns {S3Client} - Configured S3Client instance.
    */
   createS3Client (endpoint, region, profile, verbose) {
+    // Connection pool + timeouts, all env-tunable.
+    // The AWS SDK's default agent caps concurrent connections at 50 sockets, which throttles many parallel
+    // tile range-GETs under load; raise TILESERVER_GL_S3_MAX_SOCKETS to widen it.
+    const maxSockets = intEnv('TILESERVER_GL_S3_MAX_SOCKETS', 256)
+    const keepAlive = boolEnv('TILESERVER_GL_S3_KEEP_ALIVE', true)
+    const connectionTimeout = intEnv(
+      'TILESERVER_GL_S3_CONNECTION_TIMEOUT_MS',
+      5000,
+      0,
+    )
+    const requestTimeout = intEnv('TILESERVER_GL_S3_REQUEST_TIMEOUT_MS', 5000, 0)
+
+    if (verbose >= 2) {
+      console.log(
+        `S3 client pool: maxSockets=${maxSockets} keepAlive=${keepAlive} ` +
+        `connectionTimeout=${connectionTimeout}ms requestTimeout=${requestTimeout}ms`,
+      )
+    }
+
     const config = {
       region: region,
       requestHandler: {
-        connectionTimeout: 5000,
-        socketTimeout: 5000,
+        connectionTimeout,
+        requestTimeout,
+        httpAgent: new http.Agent({ keepAlive, maxSockets }),
+        httpsAgent: new https.Agent({ keepAlive, maxSockets }),
       },
       forcePathStyle: !!endpoint,
     }
