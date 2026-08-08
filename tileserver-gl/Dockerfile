@@ -43,16 +43,14 @@ RUN npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 100000 && \
     npm config set fetch-retry-maxtimeout 600000 && \
     npm ci --omit=dev && \
-    # Build canvas from source for the Noble architecture.
-    # node-gyp reads npm_config_* from the env; npm 11 rejects
-    # `--build-from-source` as an unknown CLI flag.
+    # Build canvas from source for the Noble architecture. node-gyp reads npm_config_* from the env;  \
+    # npm 11 rejects `--build-from-source` as an unknown CLI flag.
     npm_config_build_from_source=true npm rebuild canvas && \
     chown -R root:root /usr/src/app
 
-# Drop packages that are only needed while installing/building. The browser
-# bundles were already copied into public/resources by the `prepare` lifecycle
-# script above, and the gyp toolchain is never used again once the native
-# addons are compiled.
+# Drop packages that are only needed while installing/building. \
+# The browser bundles were already copied into public/resources by the `prepare` lifecycle
+# script above, and the gyp toolchain is never used again once the native addons are compiled.
 RUN rm -rf \
       node_modules/maplibre-gl \
       node_modules/leaflet \
@@ -77,6 +75,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
       ca-certificates \
       curl \
       gnupg \
+      tini \
       xvfb \
       libglfw3 \
       libuv1 \
@@ -100,8 +99,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get -y remove curl gnupg && \
     apt-get -y --purge autoremove && \
     apt-get clean && \
-    # The runtime only ever executes `node`. The nodejs package also ships
-    # addon headers, npm and corepack, none of which are used here.
+    # The runtime only ever executes `node`. The nodejs package also ships addon headers, npm and corepack, none of which are used here.
     rm -rf \
       /usr/include/node \
       /usr/lib/node_modules \
@@ -114,6 +112,7 @@ RUN mkdir -p /home/node/.aws && \
 
 ENV \
     NODE_ENV="production" \
+    HOME="/home/node" \
     CHOKIDAR_USEPOLLING=1 \
     CHOKIDAR_INTERVAL=500 \
     LD_PRELOAD="/usr/lib/libjemalloc.so" \
@@ -130,6 +129,11 @@ EXPOSE 8080
 
 USER node:node
 
-ENTRYPOINT ["/usr/src/app/docker-entrypoint.sh"]
+# tini as PID 1 reaps the Xvfb the entrypoint backgrounds;
+# without an init, node (PID 1) never reaps it and a crashed Xvfb lingers as a zombie.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/src/app/docker-entrypoint.sh"]
 
-HEALTHCHECK CMD node /usr/src/app/src/healthcheck.js
+# start-period gives slow first boots (large datasets) a grace window where a failing probe keeps the container "starting"
+# rather than flipping it to "unhealthy"; a success during it marks healthy immediately.
+HEALTHCHECK --start-period=60s --interval=30s --timeout=5s --retries=3 \
+  CMD node /usr/src/app/src/healthcheck.js

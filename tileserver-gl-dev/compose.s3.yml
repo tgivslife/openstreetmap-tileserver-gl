@@ -1,0 +1,143 @@
+# End-to-end S3 / PMTiles stack: a STATELESS tileserver-gl image (built from tileserver-gl/Dockerfile_light_s3,
+# which bakes config.json + styles + fonts from ../tileserver-gl-data) reads a PMTiles tileset from a PRIVATE MinIO
+# bucket over the credentialed S3 path (SigV4).
+# It exercises the s3+http:// custom-endpoint support and shows no public bucket policy is needed — the access key/secret authorize the reads.
+# The container carries no tile data and mounts nothing.
+#
+# 1. Obtain the stateless image once. Compose does not build it — it consumes a fixed tag, so the same artifact runs here and in production.
+#    Either pull:
+#
+#      docker pull stsdockerhub/tileserver-gl:<ver>-light-s3
+#
+#    or build the two-step chain from ../tileserver-gl (the light base carries the code, the child bakes config.json + styles + fonts on top):
+#
+#      docker build -f Dockerfile_light . -t stsdockerhub/tileserver-gl:<ver>-light
+#      docker build -f Dockerfile_light_s3 ../tileserver-gl-data --build-arg BASE=stsdockerhub/tileserver-gl:<ver>-light -t stsdockerhub/tileserver-gl:<ver>-light-s3
+#
+# 2. Generate the tileset once (mbtiles -> pmtiles). The go-pmtiles image is distroless (no shell), so this is a plain `convert`,
+#    guarded by a profile so it never runs on a normal `up`:
+#
+#      docker compose -f compose.s3.yml --profile setup run --rm convert
+#
+#    It writes ./data/pmtiles/romania.pmtiles and errors if that file already exists — delete it to regenerate.
+#
+# 3. Bring the stack up:
+#
+#      docker compose -f compose.s3.yml up -d
+#
+#      MinIO console : http://localhost:9101   (minioadmin / minioadmin)
+#      Tileserver    : http://localhost:8082
+#      A tile        : http://localhost:8082/data/planet-s3/10/582/366.pbf
+#
+# 4. Tear down (add -v to also drop the MinIO volume):
+#
+#      docker compose -f compose.s3.yml down
+#
+# Credentials: the tileserver receives the MinIO key/secret as AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY;
+# the AWS SDK default provider chain picks them up and signs every GetObject. Nothing is made public.
+# For real AWS S3 instead of MinIO, drop the `minio*` services, set the same two env vars (or use an IAM role) and
+# point the baked config's data source at "s3://<bucket>/<key>.pmtiles".
+
+name: tileserver-s3
+
+x-minio-creds: &minio-creds
+  MINIO_ROOT_USER: minioadmin
+  MINIO_ROOT_PASSWORD: minioadmin
+
+services:
+  minio:
+    # Pinned for reproducibility. This is the last community release that still
+    # ships the full web console the step-3 instructions above use; later builds
+    # stripped it. Bump deliberately, not implicitly via :latest.
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      <<: *minio-creds
+    ports:
+      - "9100:9000" # S3 API
+      - "9101:9001" # web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: create the (private) bucket and upload the tileset, then exit.
+  minio-setup:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      <<: *minio-creds
+    volumes:
+      - ./data/pmtiles/planet.pmtiles:/import/planet.pmtiles:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing local/tiles
+        if mc stat local/tiles/planet.pmtiles >/dev/null 2>&1; then
+          echo "object 'planet.pmtiles' already in bucket 'tiles'; skipping upload."
+        else
+          mc cp /import/planet.pmtiles local/tiles/planet.pmtiles
+          echo "bucket 'tiles' ready (private); object uploaded."
+        fi
+
+  # Stateless: config/styles/fonts are baked in (see Dockerfile_light_s3); the only runtime input is the S3 tile data and the credentials below. No mounts.
+  tileserver-gl:
+    image: stsdockerhub/tileserver-gl:5.7.0-pre.0-light-s3
+    depends_on:
+      minio-setup:
+        condition: service_completed_successfully
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+      # The baked config.json reads PMTILES_URL (falling back to this MinIO URL if unset).
+      # For real AWS you'd set e.g. s3://my-bucket/planet.pmtiles here — same image, no rebuild.
+      PMTILES_URL: s3+http://minio:9000/tiles/planet.pmtiles
+      # Public base URL (env fallback added in main.js); also silences the host-header security warning.
+      PUBLIC_URL: http://localhost:8082
+      # Host-header allowlist — the dedicated env var, kept out of config.json.
+      TILESERVER_GL_ALLOWED_HOSTS: localhost
+      # Optional: override the baked config's ${TILE_CACHE_CONTROL}.
+      # TILE_CACHE_CONTROL: "public, max-age=3600"
+      # --- Auth gate (enabled to exercise API-key + HMAC-token access) --------
+      # With either var below set, EVERY endpoint except /health and the viewer's static assets requires a ?key=. A keyless tile then returns 403.
+      #   curl -o /dev/null -w '%{http_code}\n' \
+      #     http://localhost:8082/data/planet-s3/10/582/366.pbf            # 403
+      #
+      # 1) Static key — comma-separated; append ?key=devkey123 to any request:
+      TILESERVER_GL_API_KEYS: "devkey123"
+      #     curl ".../366.pbf?key=devkey123"                               # 200
+      #
+      # 2) Expiring HMAC token — key=<unix-expiry>.<hmac_sha256(expiry, secret)>.
+      #    Mint one with the helper (no shell-quoting pitfalls). From this dir:
+      #      node gen-token.js            # 1h token   (node gen-token.js 86400 = 24h)
+      #      curl ".../366.pbf?key=<token>"                                # 200
+      #    It defaults to the secret below; if you change the secret, generate with a matching env: `TILESERVER_GL_TOKEN_SECRET=<secret> node gen-token.js`.
+      TILESERVER_GL_TOKEN_SECRET: "dev-hmac-secret"
+      # Max seconds a token's expiry may sit in the future (default 604800 = 7d);
+      # an expiry beyond now+this is rejected, capping mis-issued far-future tokens.
+      TILESERVER_GL_TOKEN_MAX_TTL: "604800"
+    # No `command:` override — the image's baked CMD (Dockerfile_light_s3) already runs `--config /data/config.json --silent --log_format ...`.
+    # Add one here only to change those defaults (a command override replaces them entirely).
+    ports:
+      - "8082:8080"
+
+  # Optional one-time tileset generation (mbtiles -> pmtiles), see header step 1.
+  convert:
+    image: protomaps/go-pmtiles:v1.31.2
+    profiles: ["setup"]
+    volumes:
+      - ./data/mbtiles:/mb:ro
+      - ./data/pmtiles:/pm
+    command:
+      ["convert", "/mb/romania-latest.tilemaker.mbtiles", "/pm/romania.pmtiles"]
+
+volumes:
+  minio_data:

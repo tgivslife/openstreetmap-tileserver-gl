@@ -1,13 +1,13 @@
-'use strict';
+'use strict'
 
-import fsp from 'node:fs/promises';
-import path from 'path';
+import fsp from 'node:fs/promises'
+import path from 'path'
 
-import clone from 'clone';
-import express from 'express';
-import { PbfReader } from 'pbf';
-import { VectorTile } from '@mapbox/vector-tile';
-import { SphericalMercator } from '@mapbox/sphericalmercator';
+import clone from 'clone'
+import express from 'express'
+import { PbfReader } from 'pbf'
+import { VectorTile } from '@mapbox/vector-tile'
+import { SphericalMercator } from '@mapbox/sphericalmercator'
 
 import {
   fetchTileData,
@@ -16,27 +16,28 @@ import {
   isValidRemoteUrl,
   lonLatToTilePixel,
   setCacheControl,
-} from './utils.js';
-import { getPMtilesInfo, openPMtiles } from './pmtiles_adapter.js';
-import { gunzipP, gzipP } from './promises.js';
-import { openMbTilesWrapper } from './mbtiles_wrapper.js';
+  setHostDerivedCacheControl,
+} from './utils.js'
+import { getPMtilesInfo, openPMtiles } from './pmtiles_adapter.js'
+import { gunzipP, gzipP } from './promises.js'
+import { openMbTilesWrapper } from './mbtiles_wrapper.js'
 
-import fs from 'node:fs';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs'
+import { fileURLToPath } from 'url'
 
-let metricsModule = null;
+let metricsModule = null
 
 const packageJson = JSON.parse(
   fs.readFileSync(
     path.dirname(fileURLToPath(import.meta.url)) + '/../package.json',
     'utf8',
   ),
-);
+)
 
-const isLight = packageJson.name.slice(-6) === '-light';
+const isLight = packageJson.name.slice(-6) === '-light'
 const { serve_rendered } = await import(
   `${!isLight ? `./serve_rendered.js` : `./serve_light.js`}`
-);
+  )
 
 export const serve_data = {
   /**
@@ -47,19 +48,17 @@ export const serve_data = {
    * @returns {express.Application} The initialized Express application.
    */
   init: function (options, repo, programOpts) {
-    const { verbose, allowedHosts } = programOpts;
+    const { verbose, allowedHosts } = programOpts
     // Cache metrics module if enabled. Safe because tests verify before production.
     if (programOpts.metrics) {
-      import('./metrics.js')
-        .then((m) => {
-          metricsModule = m;
-        })
-        .catch((err) => {
-          console.error('Failed to import metrics module:', err);
-        });
+      import('./metrics.js').then((m) => {
+        metricsModule = m
+      }).catch((err) => {
+        console.error('Failed to import metrics module:', err)
+      })
     }
-    const app = express().disable('x-powered-by');
-    app.use(express.json());
+    const app = express().disable('x-powered-by')
+    app.use(express.json())
 
     /**
      * Handles requests for tile data, responding with the tile image.
@@ -74,37 +73,36 @@ export const serve_data = {
      */
     app.get('/:id/:z/:x/:y.:format', async (req, res) => {
       if (verbose >= 1) {
-        console.log(
-          `Handling tile request for: /data/%s/%s/%s/%s.%s`,
+        console.log(`Handling tile request for: /data/%s/%s/%s/%s.%s`,
           String(req.params.id).replace(/\n|\r/g, ''),
           String(req.params.z).replace(/\n|\r/g, ''),
           String(req.params.x).replace(/\n|\r/g, ''),
           String(req.params.y).replace(/\n|\r/g, ''),
           String(req.params.format).replace(/\n|\r/g, ''),
-        );
+        )
       }
 
-      const item = repo[req.params.id];
+      const item = repo[req.params.id]
       if (!item) {
-        return res.sendStatus(404);
+        return res.sendStatus(404)
       }
-      const tileJSONFormat = item.tileJSON.format;
-      const z = parseInt(req.params.z, 10);
-      const x = parseInt(req.params.x, 10);
-      const y = parseInt(req.params.y, 10);
+      const tileJSONFormat = item.tileJSON.format
+      const z = parseInt(req.params.z, 10)
+      const x = parseInt(req.params.x, 10)
+      const y = parseInt(req.params.y, 10)
       if (isNaN(z) || isNaN(x) || isNaN(y)) {
-        return res.status(404).send('Invalid Tile');
+        return res.status(404).send('Invalid Tile')
       }
 
-      let format = req.params.format;
+      let format = req.params.format
       if (format === options.pbfAlias) {
-        format = 'pbf';
+        format = 'pbf'
       }
       if (
         format !== tileJSONFormat &&
         !(format === 'geojson' && tileJSONFormat === 'pbf')
       ) {
-        return res.status(404).send('Invalid format');
+        return res.status(404).send('Invalid format')
       }
       if (
         z < item.tileJSON.minzoom ||
@@ -114,7 +112,7 @@ export const serve_data = {
         x >= Math.pow(2, z) ||
         y >= Math.pow(2, z)
       ) {
-        return res.status(404).send('Out of bounds');
+        return res.status(404).send('Out of bounds')
       }
 
       const fetchTile = await fetchTileData(
@@ -123,28 +121,25 @@ export const serve_data = {
         z,
         x,
         y,
-      );
+      )
       if (fetchTile == null) {
         // sparse=true (default) -> 404 (allows overzoom)
         // sparse=false -> 204 (empty tile, no overzoom)
-        return res.status(item.sparse ? 404 : 204).send();
+        return res.status(item.sparse ? 404 : 204).send()
       }
 
-      let data = fetchTile.data;
-      const headers = fetchTile.headers || {};
-      // Gzip magic bytes, compared directly to avoid allocating a needle
-      // Buffer on every request.
-      const isGzipped = data.length > 1 && data[0] === 0x1f && data[1] === 0x8b;
+      let data = fetchTile.data
+      const headers = fetchTile.headers || {}
+      // Gzip magic bytes, compared directly to avoid allocating a needle Buffer on every request.
+      const isGzipped = data.length > 1 && data[0] === 0x1f && data[1] === 0x8b
 
       // Only the paths that read or rewrite the tile bytes need them decompressed.
       // Vector tiles are stored gzipped and are served gzipped, so for the common case the stored blob is handed
       // straight to the client instead of being gunzipped and re-gzipped on every request.
-      const needsRaw =
-        format === 'geojson' ||
-        (tileJSONFormat === 'pbf' && Boolean(options.dataDecoratorFunc));
+      const needsRaw = format === 'geojson' || (tileJSONFormat === 'pbf' && Boolean(options.dataDecoratorFunc))
 
       if (isGzipped && needsRaw) {
-        data = await gunzipP(data);
+        data = await gunzipP(data)
       }
 
       if (tileJSONFormat === 'pbf') {
@@ -156,68 +151,74 @@ export const serve_data = {
             z,
             x,
             y,
-          );
+          )
         }
       }
 
       if (format === 'pbf') {
-        headers['Content-Type'] = 'application/x-protobuf';
+        headers['Content-Type'] = 'application/x-protobuf'
       } else if (format === 'geojson') {
-        headers['Content-Type'] = 'application/json';
-        const tile = new VectorTile(new PbfReader(data));
+        headers['Content-Type'] = 'application/json'
+        const tile = new VectorTile(new PbfReader(data))
         const geojson = {
           type: 'FeatureCollection',
           features: [],
-        };
+        }
         for (const layerName in tile.layers) {
           // eslint-disable-next-line security/detect-object-injection -- layerName from VectorTile library internal data structure
-          const layer = tile.layers[layerName];
+          const layer = tile.layers[layerName]
           for (let i = 0; i < layer.length; i++) {
-            const feature = layer.feature(i);
-            const featureGeoJSON = feature.toGeoJSON(x, y, z);
-            featureGeoJSON.properties.layer = layerName;
-            geojson.features.push(featureGeoJSON);
+            const feature = layer.feature(i)
+            const featureGeoJSON = feature.toGeoJSON(x, y, z)
+            featureGeoJSON.properties.layer = layerName
+            geojson.features.push(featureGeoJSON)
           }
         }
-        data = JSON.stringify(geojson);
+        data = JSON.stringify(geojson)
       }
       // The mbtiles ETag describes the file, not the tile, so it would be the same for every tile in the archive.
       // Dropping it lets express derive a body-based one.
-      delete headers['ETag'];
+      delete headers['ETag']
 
       // RFC 7231 §5.3.4: a missing Accept-Encoding means any encoding is acceptable.
       // Only an explicit header that excludes gzip forces identity.
       const acceptsGzip =
         req.headers['accept-encoding'] === undefined ||
-        req.acceptsEncodings('gzip') === 'gzip';
+        req.acceptsEncodings('gzip') === 'gzip'
       // png/jpg/webp are already compressed; gzipping them burns CPU to no effect.
-      const compressible = format === 'pbf' || format === 'geojson';
+      const compressible = format === 'pbf' || format === 'geojson'
 
-      let gzipped = isGzipped && !needsRaw;
+      let gzipped = isGzipped && !needsRaw
       if (gzipped && !acceptsGzip) {
-        data = await gunzipP(data);
-        gzipped = false;
+        data = await gunzipP(data)
+        gzipped = false
       } else if (!gzipped && acceptsGzip && compressible) {
-        data = await gzipP(data);
-        gzipped = true;
+        data = await gzipP(data)
+        gzipped = true
       }
 
       if (gzipped) {
-        headers['Content-Encoding'] = 'gzip';
+        headers['Content-Encoding'] = 'gzip'
       } else {
-        delete headers['Content-Encoding'];
+        delete headers['Content-Encoding']
       }
-      res.set(headers);
-      setCacheControl(res, options, 'tile');
+      res.set(headers)
+      // When gzip was in play — a compressible format or a stored-gzipped blob — the Content-Encoding above was chosen from Accept-Encoding,
+      // so a shared cache must key on it (RFC 9110 §12.5.5) to avoid serving a gzip body to a client that did not accept one.
+      // Already-compressed raster tiles are always identity, so they are left un-Varied to keep the cache from fragmenting.
+      if (compressible || isGzipped) {
+        res.vary('Accept-Encoding')
+      }
+      setCacheControl(res, options, 'tile')
 
       if (metricsModule) {
         metricsModule.tilesServedTotal.inc({
           type: 'vector',
           name: req.params.id,
-        });
+        })
       }
-      return res.status(200).send(data);
-    });
+      return res.status(200).send(data)
+    })
 
     /**
      * Validates elevation data source and returns source info or sends error response.
@@ -227,49 +228,49 @@ export const serve_data = {
      */
     const validateElevationSource = (id, res) => {
       // eslint-disable-next-line security/detect-object-injection -- id is route parameter for data source lookup
-      const item = repo?.[id];
+      const item = repo?.[id]
       if (!item) {
-        res.sendStatus(404);
-        return null;
+        res.sendStatus(404)
+        return null
       }
       if (!item.source) {
-        res.status(404).send('Missing source');
-        return null;
+        res.status(404).send('Missing source')
+        return null
       }
       if (!item.tileJSON) {
-        res.status(404).send('Missing tileJSON');
-        return null;
+        res.status(404).send('Missing tileJSON')
+        return null
       }
       if (!item.sourceType) {
-        res.status(404).send('Missing sourceType');
-        return null;
+        res.status(404).send('Missing sourceType')
+        return null
       }
-      const { source, tileJSON, sourceType } = item;
+      const { source, tileJSON, sourceType } = item
       if (sourceType !== 'pmtiles' && sourceType !== 'mbtiles') {
-        res.status(400).send('Invalid sourceType. Must be pmtiles or mbtiles.');
-        return null;
+        res.status(400).send('Invalid sourceType. Must be pmtiles or mbtiles.')
+        return null
       }
-      const encoding = tileJSON?.encoding;
+      const encoding = tileJSON?.encoding
       if (encoding == null) {
-        res.status(400).send('Missing tileJSON.encoding');
-        return null;
+        res.status(400).send('Missing tileJSON.encoding')
+        return null
       }
       if (encoding !== 'terrarium' && encoding !== 'mapbox') {
-        res.status(400).send('Invalid encoding. Must be terrarium or mapbox.');
-        return null;
+        res.status(400).send('Invalid encoding. Must be terrarium or mapbox.')
+        return null
       }
-      const format = tileJSON?.format;
+      const format = tileJSON?.format
       if (format == null) {
-        res.status(400).send('Missing tileJSON.format');
-        return null;
+        res.status(400).send('Missing tileJSON.format')
+        return null
       }
       if (format !== 'webp' && format !== 'png') {
-        res.status(400).send('Invalid format. Must be webp or png.');
-        return null;
+        res.status(400).send('Invalid format. Must be webp or png.')
+        return null
       }
       if (tileJSON.minzoom == null || tileJSON.maxzoom == null) {
-        res.status(400).send('Missing tileJSON zoom bounds');
-        return null;
+        res.status(400).send('Missing tileJSON zoom bounds')
+        return null
       }
       return {
         source,
@@ -279,8 +280,8 @@ export const serve_data = {
         tileSize: tileJSON.tileSize || 512,
         minzoom: tileJSON.minzoom,
         maxzoom: tileJSON.maxzoom,
-      };
-    };
+      }
+    }
 
     /**
      * Validates that a point has valid lon, lat, and z properties.
@@ -290,19 +291,19 @@ export const serve_data = {
      */
     const validatePoint = (point, index) => {
       if (point == null || typeof point !== 'object') {
-        return `Invalid point at index ${index}: point must be an object`;
+        return `Invalid point at index ${index}: point must be an object`
       }
       if (typeof point.lon !== 'number' || !isFinite(point.lon)) {
-        return `Invalid point at index ${index}: lon must be a finite number`;
+        return `Invalid point at index ${index}: lon must be a finite number`
       }
       if (typeof point.lat !== 'number' || !isFinite(point.lat)) {
-        return `Invalid point at index ${index}: lat must be a finite number`;
+        return `Invalid point at index ${index}: lat must be a finite number`
       }
       if (typeof point.z !== 'number' || !isFinite(point.z)) {
-        return `Invalid point at index ${index}: z must be a finite number`;
+        return `Invalid point at index ${index}: z must be a finite number`
       }
-      return null;
-    };
+      return null
+    }
 
     /**
      * Gets batch elevations for an array of points.
@@ -319,63 +320,63 @@ export const serve_data = {
         tileSize,
         minzoom,
         maxzoom,
-      } = sourceInfo;
+      } = sourceInfo
 
       // Group points by tile (including zoom level in the key)
-      const tileGroups = new Map();
+      const tileGroups = new Map()
       for (let i = 0; i < points.length; i++) {
         // eslint-disable-next-line security/detect-object-injection -- i is loop counter
-        const point = points[i];
-        let zoom = point.z;
+        const point = points[i]
+        let zoom = point.z
         if (zoom < minzoom) {
-          zoom = minzoom;
+          zoom = minzoom
         }
         if (zoom > maxzoom) {
-          zoom = maxzoom;
+          zoom = maxzoom
         }
         const { tileX, tileY, pixelX, pixelY } = lonLatToTilePixel(
           point.lon,
           point.lat,
           zoom,
           tileSize,
-        );
-        const tileKey = `${zoom},${tileX},${tileY}`;
+        )
+        const tileKey = `${zoom},${tileX},${tileY}`
         if (!tileGroups.has(tileKey)) {
-          tileGroups.set(tileKey, { zoom, tileX, tileY, pixels: [] });
+          tileGroups.set(tileKey, { zoom, tileX, tileY, pixels: [] })
         }
-        tileGroups.get(tileKey).pixels.push({ pixelX, pixelY, index: i });
+        tileGroups.get(tileKey).pixels.push({ pixelX, pixelY, index: i })
       }
 
       // Initialize results array with nulls
-      const results = new Array(points.length).fill(null);
+      const results = new Array(points.length).fill(null)
 
       // Process each tile and extract elevations
       for (const [, tileData] of tileGroups) {
-        const { zoom, tileX, tileY, pixels } = tileData;
+        const { zoom, tileX, tileY, pixels } = tileData
         const fetchTile = await fetchTileData(
           source,
           sourceType,
           zoom,
           tileX,
           tileY,
-        );
+        )
         if (fetchTile == null) {
-          continue;
+          continue
         }
 
         const elevations = await serve_rendered.getBatchElevationsFromTile(
           fetchTile.data,
           { encoding, format, tile_size: tileSize },
           pixels,
-        );
+        )
         for (const { index, elevation } of elevations) {
           // eslint-disable-next-line security/detect-object-injection -- index is from internal elevation processing
-          results[index] = elevation;
+          results[index] = elevation
         }
       }
 
-      return results;
-    };
+      return results
+    }
 
     /**
      * Handles requests for elevation data.
@@ -390,29 +391,28 @@ export const serve_data = {
     app.get('/:id/elevation/:z/:x/:y', async (req, res, next) => {
       try {
         if (verbose >= 1) {
-          console.log(
-            `Handling elevation request for: /data/%s/elevation/%s/%s/%s`,
+          console.log(`Handling elevation request for: /data/%s/elevation/%s/%s/%s`,
             String(req.params.id).replace(/\n|\r/g, ''),
             String(req.params.z).replace(/\n|\r/g, ''),
             String(req.params.x).replace(/\n|\r/g, ''),
             String(req.params.y).replace(/\n|\r/g, ''),
-          );
+          )
         }
 
-        const sourceInfo = validateElevationSource(req.params.id, res);
-        if (!sourceInfo) return;
+        const sourceInfo = validateElevationSource(req.params.id, res)
+        if (!sourceInfo) return
 
-        const z = parseInt(req.params.z, 10);
-        const x = parseFloat(req.params.x);
-        const y = parseFloat(req.params.y);
+        const z = parseInt(req.params.z, 10)
+        const x = parseFloat(req.params.x)
+        const y = parseFloat(req.params.y)
 
-        let lon, lat;
-        let zoom = z;
+        let lon, lat
+        let zoom = z
 
         if (Number.isInteger(x) && Number.isInteger(y)) {
           // Tile coordinates mode - strict bounds checking
-          const intX = parseInt(req.params.x, 10);
-          const intY = parseInt(req.params.y, 10);
+          const intX = parseInt(req.params.x, 10)
+          const intY = parseInt(req.params.y, 10)
           if (
             zoom < sourceInfo.minzoom ||
             zoom > sourceInfo.maxzoom ||
@@ -421,39 +421,39 @@ export const serve_data = {
             intX >= Math.pow(2, zoom) ||
             intY >= Math.pow(2, zoom)
           ) {
-            return res.status(404).send('Out of bounds');
+            return res.status(404).send('Out of bounds')
           }
-          const bbox = new SphericalMercator().bbox(intX, intY, zoom);
-          lon = (bbox[0] + bbox[2]) / 2;
-          lat = (bbox[1] + bbox[3]) / 2;
+          const bbox = new SphericalMercator().bbox(intX, intY, zoom)
+          lon = (bbox[0] + bbox[2]) / 2
+          lat = (bbox[1] + bbox[3]) / 2
         } else {
           // Coordinate mode
-          lon = x;
-          lat = y;
+          lon = x
+          lat = y
         }
 
         const results = await getBatchElevations(sourceInfo, [
           { lon, lat, z: zoom },
-        ]);
+        ])
 
         if (results[0] == null) {
-          return res.status(204).send();
+          return res.status(204).send()
         }
 
         // Build response matching original format
         const clampedZoom = Math.min(
           Math.max(zoom, sourceInfo.minzoom),
           sourceInfo.maxzoom,
-        );
+        )
         const { tileX, tileY, pixelX, pixelY } = lonLatToTilePixel(
           lon,
           lat,
           clampedZoom,
           sourceInfo.tileSize,
-        );
+        )
 
         // Derived from the same immutable tiles, so cacheable on the same terms.
-        setCacheControl(res, options, 'tile');
+        setCacheControl(res, options, 'tile')
         res.status(200).json({
           long: lon,
           lat: lat,
@@ -463,14 +463,16 @@ export const serve_data = {
           y: tileY,
           pixelX,
           pixelY,
-        });
+        })
       } catch (err) {
+        // Log the detail server-side; the message can carry filesystem paths or S3 bucket/key names, so return only a generic reason to the client.
+        console.error('Elevation request failed:', err && err.stack ? err.stack : err,)
         return res
           .status(500)
           .header('Content-Type', 'text/plain')
-          .send(err.message);
+          .send('Elevation request failed')
       }
-    });
+    })
 
     /**
      * Handles batch elevation requests.
@@ -484,31 +486,33 @@ export const serve_data = {
      */
     app.post('/:id/elevation', async (req, res, next) => {
       try {
-        const sourceInfo = validateElevationSource(req.params.id, res);
-        if (!sourceInfo) return;
+        const sourceInfo = validateElevationSource(req.params.id, res)
+        if (!sourceInfo) return
 
-        const { points } = req.body;
+        const { points } = req.body
         if (!Array.isArray(points) || points.length === 0) {
-          return res.status(400).send('Missing or empty points array');
+          return res.status(400).send('Missing or empty points array')
         }
 
         for (let i = 0; i < points.length; i++) {
           // eslint-disable-next-line security/detect-object-injection -- i is loop counter
-          const error = validatePoint(points[i], i);
+          const error = validatePoint(points[i], i)
           if (error) {
-            return res.status(400).send(error);
+            return res.status(400).send(error)
           }
         }
 
-        const results = await getBatchElevations(sourceInfo, points);
-        res.status(200).json(results);
+        const results = await getBatchElevations(sourceInfo, points)
+        res.status(200).json(results)
       } catch (err) {
+        // Log the detail server-side; the message can carry filesystem paths or S3 bucket/key names, so return only a generic reason to the client.
+        console.error('Elevation request failed:', err && err.stack ? err.stack : err,)
         return res
           .status(500)
           .header('Content-Type', 'text/plain')
-          .send(err.message);
+          .send('Elevation request failed')
       }
-    });
+    })
 
     /**
      * Handles requests for tilejson for the data tiles.
@@ -519,18 +523,17 @@ export const serve_data = {
      */
     app.get('/:id.json', (req, res) => {
       if (verbose >= 1) {
-        console.log(
-          `Handling tilejson request for: /data/%s.json`,
+        console.log(`Handling tilejson request for: /data/%s.json`,
           String(req.params.id).replace(/\n|\r/g, ''),
-        );
+        )
       }
 
-      const item = repo[req.params.id];
+      const item = repo[req.params.id]
       if (!item) {
-        return res.sendStatus(404);
+        return res.sendStatus(404)
       }
-      const tileSize = undefined;
-      const info = clone(item.tileJSON);
+      const tileSize = undefined
+      const info = clone(item.tileJSON)
       info.tiles = getTileUrls(
         req,
         info.tiles,
@@ -542,12 +545,15 @@ export const serve_data = {
           pbf: options.pbfAlias,
         },
         allowedHosts,
-      );
-      setCacheControl(res, options, 'metadata');
-      return res.send(info);
-    });
+      )
+      setHostDerivedCacheControl(res, options, 'metadata', {
+        publicUrl: item.publicUrl,
+        allowedHosts,
+      })
+      return res.send(info)
+    })
 
-    return app;
+    return app
   },
   /**
    * Adds a new data source to the repository.
@@ -561,62 +567,58 @@ export const serve_data = {
    * @returns {Promise<void>}
    */
   add: async function (options, repo, params, id, programOpts) {
-    const { publicUrl, verbose, ignoreMissingFiles } = programOpts;
-    let inputFile;
-    let inputType;
+    const { publicUrl, verbose, ignoreMissingFiles } = programOpts
+    let inputFile
+    let inputType
     if (params.pmtiles) {
-      inputType = 'pmtiles';
+      inputType = 'pmtiles'
       // PMTiles supports HTTP, HTTPS, and S3 URLs
       if (isValidRemoteUrl(params.pmtiles)) {
-        inputFile = params.pmtiles;
+        inputFile = params.pmtiles
       } else {
-        inputFile = path.resolve(options.paths.pmtiles, params.pmtiles);
+        inputFile = path.resolve(options.paths.pmtiles, params.pmtiles)
       }
     } else if (params.mbtiles) {
-      inputType = 'mbtiles';
+      inputType = 'mbtiles'
       // MBTiles does not support remote URLs
       if (isValidRemoteUrl(params.mbtiles)) {
-        console.log(
-          `ERROR: MBTiles does not support remote files. "${params.mbtiles}" is not a valid data file.`,
-        );
-        process.exit(1);
+        console.log(`ERROR: MBTiles does not support remote files. "${params.mbtiles}" is not a valid data file.`,)
+        process.exit(1)
       } else {
-        inputFile = path.resolve(options.paths.mbtiles, params.mbtiles);
+        inputFile = path.resolve(options.paths.mbtiles, params.mbtiles)
       }
     }
 
     if (verbose >= 1) {
-      console.log(`[INFO] Loading data source '${id}' from: ${inputFile}`);
+      console.log(`[INFO] Loading data source '${id}' from: ${inputFile}`)
     }
 
     let tileJSON = {
       tiles: params.domains || options.domains,
-    };
+    }
 
     // Only check file stats for local files, not remote URLs
     if (!isValidRemoteUrl(inputFile)) {
       try {
-        const inputFileStats = await fsp.stat(inputFile);
+        const inputFileStats = await fsp.stat(inputFile)
         if (!inputFileStats.isFile() || inputFileStats.size === 0) {
-          throw Error(`Not valid input file: "${inputFile}"`);
+          throw Error(`Not valid input file: "${inputFile}"`)
         }
       } catch (_err) {
         if (ignoreMissingFiles) {
-          console.log(
-            `WARN: Data source '${id}' file not found: "${inputFile}" - skipping`,
-          );
-          return;
+          console.log(`WARN: Data source '${id}' file not found: "${inputFile}" - skipping`,)
+          return
         }
-        throw Error(`Not valid input file: "${inputFile}"`, { cause: _err });
+        throw Error(`Not valid input file: "${inputFile}"`, { cause: _err })
       }
     }
 
-    let source;
-    let sourceType;
-    tileJSON['name'] = id;
-    tileJSON['format'] = 'pbf';
-    tileJSON['encoding'] = params['encoding'];
-    tileJSON['tileSize'] = params['tileSize'];
+    let source
+    let sourceType
+    tileJSON['name'] = id
+    tileJSON['format'] = 'pbf'
+    tileJSON['encoding'] = params['encoding']
+    tileJSON['tileSize'] = params['tileSize']
 
     try {
       if (inputType === 'pmtiles') {
@@ -627,45 +629,43 @@ export const serve_data = {
           params.s3Region,
           params.s3UrlFormat,
           verbose,
-        );
-        sourceType = 'pmtiles';
-        const metadata = await getPMtilesInfo(source, inputFile);
-        Object.assign(tileJSON, metadata);
+        )
+        sourceType = 'pmtiles'
+        const metadata = await getPMtilesInfo(source, inputFile)
+        Object.assign(tileJSON, metadata)
       } else if (inputType === 'mbtiles') {
-        sourceType = 'mbtiles';
-        const mbw = await openMbTilesWrapper(inputFile);
-        const info = await mbw.getInfo();
-        source = mbw.getMbTiles();
-        Object.assign(tileJSON, info);
+        sourceType = 'mbtiles'
+        const mbw = await openMbTilesWrapper(inputFile)
+        const info = await mbw.getInfo()
+        source = mbw.getMbTiles()
+        Object.assign(tileJSON, info)
       }
     } catch (err) {
       if (ignoreMissingFiles) {
-        console.log(
-          `WARN: Unable to open data source '${id}' from "${inputFile}": ${err.message} - skipping (requests will return 404)`,
-        );
-        return;
+        console.log(`WARN: Unable to open data source '${id}' from "${inputFile}": ${err.message} - skipping (requests will return 404)`,)
+        return
       }
-      throw err;
+      throw err
     }
 
-    delete tileJSON['filesize'];
-    delete tileJSON['mtime'];
-    delete tileJSON['scheme'];
-    tileJSON['tilejson'] = '3.0.0';
+    delete tileJSON['filesize']
+    delete tileJSON['mtime']
+    delete tileJSON['scheme']
+    tileJSON['tilejson'] = '3.0.0'
 
-    Object.assign(tileJSON, params.tilejson || {});
-    fixTileJSONCenter(tileJSON);
+    Object.assign(tileJSON, params.tilejson || {})
+    fixTileJSONCenter(tileJSON)
 
     if (options.dataDecoratorFunc) {
-      tileJSON = options.dataDecoratorFunc(id, 'tilejson', tileJSON);
+      tileJSON = options.dataDecoratorFunc(id, 'tilejson', tileJSON)
     }
 
     // Determine sparse: per-source overrides global, then format-based default
     // sparse=true -> 404 (allows overzoom)
     // sparse=false -> 204 (empty tile, no overzoom)
     // Default: vector tiles (pbf) -> false, raster tiles -> true
-    const isVector = tileJSON.format === 'pbf';
-    const sparse = params.sparse ?? options.sparse ?? !isVector;
+    const isVector = tileJSON.format === 'pbf'
+    const sparse = params.sparse ?? options.sparse ?? !isVector
 
     // eslint-disable-next-line security/detect-object-injection -- id is from config file data source names
     repo[id] = {
@@ -674,7 +674,7 @@ export const serve_data = {
       source,
       sourceType,
       sparse,
-    };
+    }
   },
   /**
    * Removes all items from the repository and closes owned local data sources.
@@ -685,20 +685,20 @@ export const serve_data = {
     await Promise.all(
       Object.keys(repo).map(async (id) => {
         // eslint-disable-next-line security/detect-object-injection -- id is from Object.keys() iteration
-        const item = repo[id];
+        const item = repo[id]
         try {
           if (item && item.sourceType === 'mbtiles' && item.source) {
             await new Promise((resolve, reject) => {
-              item.source.close((err) => (err ? reject(err) : resolve()));
-            });
+              item.source.close((err) => (err ? reject(err) : resolve()))
+            })
           }
         } catch (err) {
-          console.warn(`Failed to close data source "${id}":`, err);
+          console.warn(`Failed to close data source "${id}":`, err)
         } finally {
           // eslint-disable-next-line security/detect-object-injection -- id is from Object.keys() iteration
-          delete repo[id];
+          delete repo[id]
         }
       }),
-    );
+    )
   },
-};
+}

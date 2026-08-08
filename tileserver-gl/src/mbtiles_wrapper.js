@@ -1,38 +1,38 @@
-import MBTiles from '@mapbox/mbtiles';
-import util from 'node:util';
+import MBTiles from '@mapbox/mbtiles'
+import util from 'node:util'
 
 /**
  * Promise-ful wrapper around the MBTiles class.
  */
 class MBTilesWrapper {
-  constructor(mbtiles) {
-    this._mbtiles = mbtiles;
-    this._getInfoP = util.promisify(mbtiles.getInfo.bind(mbtiles));
-    this._closeP = util.promisify(mbtiles.close.bind(mbtiles));
+  constructor (mbtiles) {
+    this._mbtiles = mbtiles
+    this._getInfoP = util.promisify(mbtiles.getInfo.bind(mbtiles))
+    this._closeP = util.promisify(mbtiles.close.bind(mbtiles))
   }
 
   /**
    * Get the underlying MBTiles object.
    * @returns {MBTiles} The MBTiles instance.
    */
-  getMbTiles() {
-    return this._mbtiles;
+  getMbTiles () {
+    return this._mbtiles
   }
 
   /**
    * Get the MBTiles metadata object.
    * @returns {Promise<object>} A promise that resolves with the MBTiles metadata object.
    */
-  getInfo() {
-    return this._getInfoP();
+  getInfo () {
+    return this._getInfoP()
   }
 
   /**
    * Closes the underlying MBTiles database handle.
    * @returns {Promise<void>} A promise that resolves when the database is closed.
    */
-  close() {
-    return this._closeP();
+  close () {
+    return this._closeP()
   }
 }
 
@@ -41,14 +41,14 @@ class MBTilesWrapper {
  * @param {string} inputFile - The path to the input MBTiles file.
  * @returns {Promise<MBTilesWrapper>} A promise that resolves with a MBTilesWrapper instance or rejects with an error.
  */
-export function openMbTilesWrapper(inputFile) {
+export function openMbTilesWrapper (inputFile) {
   return new Promise((resolve, reject) => {
     const mbtiles = new MBTiles(inputFile + '?mode=ro', (err) => {
       if (err) {
-        reject(err);
-        return;
+        reject(err)
+        return
       }
-      resolve(new MBTilesWrapper(mbtiles));
-    });
-  });
+      resolve(new MBTilesWrapper(mbtiles))
+    })
+  })
 }

@@ -6,16 +6,20 @@
   <title>TileServer GL - Server for vector and raster maps with GL styles</title>
   <link rel="stylesheet" type="text/css" href="{{public_url}}index.css{{&key_query}}" />
   <script>
-    function toggle_link(id, link) {
-      var el = document.getElementById(id);
-      var s = el.style;
+    function toggle_link(source) {
+      // Both the target input id and the URL are read from the source anchor's data-* attributes rather than passed as JS string arguments,
+      // so neither sits in a JS-string-inside-an-HTML-attribute context (where HTML escaping alone would not prevent a quote from breaking out).
+      var id = source.getAttribute('data-target');
+      var link = source.getAttribute('data-link');
+      var input = document.getElementById(id);
+      var s = input.style;
       if (s.display == 'none') {
         s.display = 'inline-block';
-      } else if (el.value == link) {
+      } else if (input.value == link) {
         s.display = 'none';
       }
-      el.value = link;
-      el.setSelectionRange(0, el.value.length);
+      input.value = link;
+      input.setSelectionRange(0, input.value.length);
       return false;
     }
 
@@ -71,7 +75,7 @@
                 | <a href="{{public_url}}styles/{{@key}}/wmts.xml{{&../key_query}}">WMTS</a>
               {{/if}}
               {{#if xyz_link}}
-                | <a href="#" onclick="return toggle_link('xyz_style_{{@key}}', '{{&xyz_link}}');">XYZ</a>
+                | <a href="#" data-target="xyz_style_{{@key}}" data-link="{{xyz_link}}" onclick="return toggle_link(this);">XYZ</a>
                   <input id="xyz_style_{{@key}}" type="text" value="" style="display:none;" />
               {{/if}}
             </p>
@@ -105,15 +109,15 @@
           {{/if}}
           <div class="details">
             <h3>{{tileJSON.name}}</h3>
-            <div class="identifier">identifier: {{@key}}{{#if formatted_filesize}} | size: {{formatted_filesize}}{{/if}}</div>
+            <div class="identifier">identifier: {{@key}}</div>
             <div class="identifier">type: {{#is_vector}}vector{{/is_vector}}{{^is_vector}}raster{{/is_vector}} data {{#if sourceType}} | ext: {{sourceType}}{{/if}}</div>
             <p class="services">
               services: <a href="{{public_url}}data/{{@key}}.json{{&../key_query}}">TileJSON</a>
               {{#if xyz_link}}
-                | <a href="#" onclick="return toggle_link('link_data_{{@key}}', '{{&xyz_link}}');">XYZ</a>
+                | <a href="#" data-target="link_data_{{@key}}" data-link="{{xyz_link}}" onclick="return toggle_link(this);">XYZ</a>
               {{/if}}
               {{#if elevation_link}}
-                | <a href="#" onclick="return toggle_link('link_data_{{@key}}', '{{&elevation_link}}');">Elevation</a>
+                | <a href="#" data-target="link_data_{{@key}}" data-link="{{elevation_link}}" onclick="return toggle_link(this);">Elevation</a>
               {{/if}}
                 <input id="link_data_{{@key}}" type="text" value="" style="display:none;" />
             </p>

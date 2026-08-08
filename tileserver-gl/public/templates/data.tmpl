@@ -81,12 +81,12 @@
       sources: {
         "terrain": {
           "type": "raster-dem",
-          "url": "{{public_url}}data/{{id}}.json",
+          "url": "{{public_url}}data/{{id}}.json" + keyParam,
           "encoding": "{{terrain_encoding}}"
         },
         "hillshade": {
           "type": "raster-dem",
-          "url": "{{public_url}}data/{{id}}.json",
+          "url": "{{public_url}}data/{{id}}.json" + keyParam,
           "encoding": "{{terrain_encoding}}"
         }
       },
@@ -144,7 +144,7 @@
     {{^is_light}}
     map.addControl(
       new ElevationInfoControl({
-        url: "{{public_url}}data/{{id}}/elevation/{z}/{x}/{y}"
+        url: "{{public_url}}data/{{id}}/elevation/{z}/{x}/{y}" + keyParam
       })
     );
     {{/is_light}}

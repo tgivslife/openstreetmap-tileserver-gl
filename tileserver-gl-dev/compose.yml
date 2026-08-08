@@ -1,9 +1,12 @@
 services:
   tileserver-gl:
     container_name: tileserver-gl
-    image: stsdockerhub/tileserver-gl-light:5.7.0-pre.0
+    image: stsdockerhub/tileserver-gl:5.7.0-pre.0-light
     volumes:
-      - "./data:/data"
+      - "./data:/data" # config.json + tile databases (mbtiles/pmtiles)
+      # styles and fonts live in the shared assets folder, mounted into /data:
+      - "../tileserver-gl-data/styles:/data/styles:ro"
+      - "../tileserver-gl-data/fonts:/data/fonts:ro"
     # --silent logs only non-200/304 responses (errors), keeping the access log quiet on a tile server.
     # --log_format prepends an ISO-8601 timestamp to the default `tiny` fields so lines are self-contained
     #   (redundant if your log collector already stamps ingestion time; keep for file logs / plain `docker logs`).

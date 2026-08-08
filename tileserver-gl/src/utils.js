@@ -1,20 +1,20 @@
-'use strict';
+'use strict'
 
-import path from 'path';
-import fsPromises from 'fs/promises';
-import fs from 'node:fs';
-import clone from 'clone';
-import { combine } from '@jsse/pbfont';
-import { existsP } from './promises.js';
-import { getPMtilesTile } from './pmtiles_adapter.js';
+import path from 'path'
+import fsPromises from 'fs/promises'
+import fs from 'node:fs'
+import clone from 'clone'
+import { combine } from '@jsse/pbfont'
+import { existsP } from './promises.js'
+import { getPMtilesTile } from './pmtiles_adapter.js'
 
-export const allowedSpriteFormats = allowedOptions(['png', 'json']);
-export const allowedTileSizes = allowedOptions(['256', '512']);
-export const httpTester = /^https?:\/\//i;
-export const s3Tester = /^s3:\/\//i; // Plain AWS S3 format
-export const s3HttpTester = /^s3\+https?:\/\//i; // S3-compatible with custom endpoint
-export const pmtilesTester = /^pmtiles:\/\//i;
-export const mbtilesTester = /^mbtiles:\/\//i;
+export const allowedSpriteFormats = allowedOptions(['png', 'json'])
+export const allowedTileSizes = allowedOptions(['256', '512'])
+export const httpTester = /^https?:\/\//i
+export const s3Tester = /^s3:\/\//i // Plain AWS S3 format
+export const s3HttpTester = /^s3\+https?:\/\//i // S3-compatible with custom endpoint
+export const pmtilesTester = /^pmtiles:\/\//i
+export const mbtilesTester = /^mbtiles:\/\//i
 
 /**
  * Restrict user input to an allowed set of options.
@@ -23,10 +23,10 @@ export const mbtilesTester = /^mbtiles:\/\//i;
  * @param {string} [config.defaultValue] - The default value to return if input doesn't match.
  * @returns {(value: string) => string} - A function that takes a value and returns it if valid or a default.
  */
-export function allowedOptions(opts, { defaultValue } = {}) {
-  const values = Object.fromEntries(opts.map((key) => [key, key]));
+export function allowedOptions (opts, { defaultValue } = {}) {
+  const values = Object.fromEntries(opts.map((key) => [key, key]))
   // eslint-disable-next-line security/detect-object-injection -- value is checked against allowed opts keys
-  return (value) => values[value] || defaultValue;
+  return (value) => values[value] || defaultValue
 }
 
 /**
@@ -35,17 +35,17 @@ export function allowedOptions(opts, { defaultValue } = {}) {
  * @param {number} maxScale Maximum allowed scale digit.
  * @returns {number|null} The parsed scale as a number or null if invalid.
  */
-export function allowedScales(scale, maxScale = 9) {
+export function allowedScales (scale, maxScale = 9) {
   if (scale === undefined) {
-    return 1;
+    return 1
   }
 
-  const regex = new RegExp(`^[2-${maxScale}]x$`);
+  const regex = new RegExp(`^[2-${maxScale}]x$`)
   if (!regex.test(scale)) {
-    return null;
+    return null
   }
 
-  return parseInt(scale.slice(0, -1), 10);
+  return parseInt(scale.slice(0, -1), 10)
 }
 
 /**
@@ -54,19 +54,19 @@ export function allowedScales(scale, maxScale = 9) {
  * @param {number} [maxScale] - The maximum scale value. If no value is passed in, it defaults to a value of 3.
  * @returns {string|null} - The valid scale string or null if invalid.
  */
-export function allowedSpriteScales(scale, maxScale = 3) {
+export function allowedSpriteScales (scale, maxScale = 3) {
   if (!scale) {
-    return '';
+    return ''
   }
-  const match = scale?.match(/^([2-9]\d*)x$/);
+  const match = scale?.match(/^([2-9]\d*)x$/)
   if (!match) {
-    return null;
+    return null
   }
-  const parsedScale = parseInt(match[1], 10);
+  const parsedScale = parseInt(match[1], 10)
   if (parsedScale <= maxScale) {
-    return `@${parsedScale}x`;
+    return `@${parsedScale}x`
   }
-  return null;
+  return null
 }
 
 /**
@@ -77,21 +77,24 @@ export function allowedSpriteScales(scale, maxScale = 3) {
  * @param {string|string[]} allowedHosts - Allowed hosts for Host header poisoning mitigation.
  * @returns {string} - The fixed URL string.
  */
-export function fixUrl(req, url, publicUrl, allowedHosts) {
+export function fixUrl (req, url, publicUrl, allowedHosts) {
   if (!url || typeof url !== 'string' || url.indexOf('local://') !== 0) {
-    return url;
+    return url
   }
-  const queryParams = [];
-  if (req.query.key) {
-    queryParams.unshift(`key=${encodeURIComponent(req.query.key)}`);
+  const queryParams = []
+  // Only a non-empty string key is embedded, matching the style cache key in serve_style.
+  // A repeated ?key=a&key=b parses to an array; treating it as a key here (Array→"a,b") while the cache key treats it
+  // as absent would poison the keyless cache entry with a stray ?key=a%2Cb.
+  if (typeof req.query.key === 'string' && req.query.key !== '') {
+    queryParams.unshift(`key=${encodeURIComponent(req.query.key)}`)
   }
-  let query = '';
+  let query = ''
   if (queryParams.length) {
-    query = `?${queryParams.join('&')}`;
+    query = `?${queryParams.join('&')}`
   }
   return (
     url.replace('local://', getPublicUrl(publicUrl, req, allowedHosts)) + query
-  );
+  )
 }
 
 /**
@@ -99,15 +102,17 @@ export function fixUrl(req, url, publicUrl, allowedHosts) {
  * @param {string} host - The input host.
  * @returns {string} - Host string with port removed.
  */
-function stripPort(host) {
-  if (!host || typeof host !== 'string') return host;
-  if (host.startsWith('[')) {
-    const i = host.indexOf(']:');
-    return i > 0 ? host.slice(0, i + 1) : host;
+function stripPort (host) {
+  if (!host || typeof host !== 'string') {
+    return host
   }
-  const i = host.lastIndexOf(':');
-  if (i > 0 && /^\d+$/.test(host.slice(i + 1))) return host.slice(0, i);
-  return host;
+  if (host.startsWith('[')) {
+    const i = host.indexOf(']:')
+    return i > 0 ? host.slice(0, i + 1) : host
+  }
+  const i = host.lastIndexOf(':')
+  if (i > 0 && /^\d+$/.test(host.slice(i + 1))) return host.slice(0, i)
+  return host
 }
 
 /**
@@ -116,22 +121,22 @@ function stripPort(host) {
  * @param {string|string[]|undefined} allowedHosts - Env TILESERVER_GL_ALLOWED_HOSTS or opts.allowedHosts.
  * @returns {string|string[]} - "*" or array of allowed host strings (port stripped, lowercased).
  */
-export function parseAllowedHosts(allowedHosts) {
+export function parseAllowedHosts (allowedHosts) {
   if (allowedHosts == null || allowedHosts === '') {
-    return '*';
+    return '*'
   }
   const normalize = (h) => {
-    const v = stripPort(String(h).trim());
-    return v ? v.toLowerCase() : '';
-  };
+    const v = stripPort(String(h).trim())
+    return v ? v.toLowerCase() : ''
+  }
   if (Array.isArray(allowedHosts)) {
-    return allowedHosts.map(normalize).filter(Boolean);
+    return allowedHosts.map(normalize).filter(Boolean)
   }
-  const s = typeof allowedHosts === 'string' ? allowedHosts.trim() : '';
+  const s = typeof allowedHosts === 'string' ? allowedHosts.trim() : ''
   if (s === '*' || s === '') {
-    return '*';
+    return '*'
   }
-  return s.split(',').map(normalize).filter(Boolean);
+  return s.split(',').map(normalize).filter(Boolean)
 }
 
 /**
@@ -140,22 +145,22 @@ export function parseAllowedHosts(allowedHosts) {
  * @param {string|string[]} allowedHosts - Result of parseAllowedHosts().
  * @returns {boolean} - True if the host is allowed, false otherwise.
  */
-export function isHostAllowed(host, allowedHosts) {
+export function isHostAllowed (host, allowedHosts) {
   if (!host || typeof host !== 'string') {
-    return false;
+    return false
   }
-  const h = stripPort(host.split(',')[0].trim()).toLowerCase();
+  const h = stripPort(host.split(',')[0].trim()).toLowerCase()
   if (allowedHosts === '*') {
-    return true;
+    return true
   }
   if (Array.isArray(allowedHosts)) {
-    return allowedHosts.includes(h);
+    return allowedHosts.includes(h)
   }
-  return false;
+  return false
 }
 
 /** Host header must not contain path or whitespace (sanity check for malformed headers). */
-const BAD_HOST_RE = /[\s/]/;
+const BAD_HOST_RE = /[\s/]/
 
 /**
  * Candidate host from request: X-Forwarded-Host or Host header.
@@ -163,28 +168,38 @@ const BAD_HOST_RE = /[\s/]/;
  * @param {object} req - Express request.
  * @returns {string|undefined} - The candidate host string, or undefined if the value is malformed.
  */
-export function getCandidateHost(req) {
+export function getCandidateHost (req) {
   const check = (raw) => {
-    if (!raw || typeof raw !== 'string') return undefined;
-    const s = raw.split(',')[0].trim();
-    if (BAD_HOST_RE.test(s)) return undefined;
-    return s;
-  };
-  const forwarded = req.get && req.get('X-Forwarded-Host');
-  if (forwarded) {
-    const v = check(forwarded);
-    if (v !== undefined) return v;
+    if (!raw || typeof raw !== 'string') {
+      return undefined
+    }
+    const s = raw.split(',')[0].trim()
+    if (BAD_HOST_RE.test(s)) {
+      return undefined
+    }
+    return s
   }
-  const host = req.get && req.get('host');
+  const forwarded = req.get && req.get('X-Forwarded-Host')
+  if (forwarded) {
+    const v = check(forwarded)
+    if (v !== undefined) {
+      return v
+    }
+  }
+  const host = req.get && req.get('host')
   if (host) {
-    const v = check(host);
-    if (v !== undefined) return v;
+    const v = check(host)
+    if (v !== undefined) {
+      return v
+    }
   }
   if (req.hostname) {
-    const v = check(req.hostname);
-    if (v !== undefined) return v;
+    const v = check(req.hostname)
+    if (v !== undefined) {
+      return v
+    }
   }
-  return undefined;
+  return undefined
 }
 
 /**
@@ -192,14 +207,11 @@ export function getCandidateHost(req) {
  * @param {object} req - Express request.
  * @returns {string} - 'http' or 'https'.
  */
-export function getSafeProtocol(req) {
-  const get = req.get && req.get.bind(req);
-  const proto =
-    (get && (get('X-Forwarded-Protocol') || get('X-Forwarded-Proto'))) ||
-    req.protocol ||
-    'http';
-  const p = (typeof proto === 'string' ? proto : '').toLowerCase();
-  return p === 'https' ? 'https' : 'http';
+export function getSafeProtocol (req) {
+  const get = req.get && req.get.bind(req)
+  const proto = (get && (get('X-Forwarded-Protocol') || get('X-Forwarded-Proto'))) || req.protocol || 'http'
+  const p = (typeof proto === 'string' ? proto : '').toLowerCase()
+  return p === 'https' ? 'https' : 'http'
 }
 
 /**
@@ -207,23 +219,25 @@ export function getSafeProtocol(req) {
  * @param {object} req - Express request object.
  * @returns {URL} - URL object with correct host and optionally path.
  */
-function getUrlObject(req) {
-  const urlObject = new URL(`${req.protocol}://${req.headers.host}/`);
+function getUrlObject (req) {
+  // getSafeProtocol clamps X-Forwarded-Proto/req.protocol to http|https so a header like `X-Forwarded-Proto: javascript`
+  // cannot inject a scheme into the absolute URLs reflected into style.json / TileJSON bodies.
+  const urlObject = new URL(`${getSafeProtocol(req)}://${req.headers.host}/`)
   // support overriding hostname by sending X-Forwarded-Host http header
-  urlObject.hostname = req.hostname;
+  urlObject.hostname = req.hostname
 
   // support overriding port by sending X-Forwarded-Port http header
-  const xForwardedPort = req.get('X-Forwarded-Port');
+  const xForwardedPort = req.get('X-Forwarded-Port')
   if (xForwardedPort) {
-    urlObject.port = xForwardedPort;
+    urlObject.port = xForwardedPort
   }
 
   // support add url prefix by sending X-Forwarded-Path http header
-  const xForwardedPath = req.get('X-Forwarded-Path');
+  const xForwardedPath = req.get('X-Forwarded-Path')
   if (xForwardedPath) {
-    urlObject.pathname = path.posix.join(xForwardedPath, urlObject.pathname);
+    urlObject.pathname = path.posix.join(xForwardedPath, urlObject.pathname)
   }
-  return urlObject;
+  return urlObject
 }
 
 /**
@@ -236,24 +250,22 @@ function getUrlObject(req) {
  * @param {string|string[]} [allowedHosts] - "*" or list of allowed hosts (e.g. from TILESERVER_GL_ALLOWED_HOSTS).
  * @returns {string} - The final public URL string (or path-only prefix if host not allowed).
  */
-export function getPublicUrl(publicUrl, req, allowedHosts) {
+export function getPublicUrl (publicUrl, req, allowedHosts) {
   if (publicUrl) {
     try {
-      return new URL(publicUrl).toString();
+      return new URL(publicUrl).toString()
     } catch {
-      return new URL(publicUrl, getUrlObject(req)).toString();
+      return new URL(publicUrl, getUrlObject(req)).toString()
     }
   }
-  const parsed = parseAllowedHosts(allowedHosts);
-  const candidateHost = getCandidateHost(req);
+  const parsed = parseAllowedHosts(allowedHosts)
+  const candidateHost = getCandidateHost(req)
   if (!isHostAllowed(candidateHost, parsed)) {
-    const xForwardedPath = req.get && req.get('X-Forwarded-Path');
-    const prefix = xForwardedPath
-      ? `/${xForwardedPath.replace(/^\/+/, '')}`
-      : '';
-    return prefix ? (prefix.endsWith('/') ? prefix : `${prefix}/`) : '/';
+    const xForwardedPath = req.get && req.get('X-Forwarded-Path')
+    const prefix = xForwardedPath ? `/${xForwardedPath.replace(/^\/+/, '')}` : ''
+    return prefix ? (prefix.endsWith('/') ? prefix : `${prefix}/`) : '/'
   }
-  return getUrlObject(req).toString();
+  return getUrlObject(req).toString()
 }
 
 /**
@@ -269,7 +281,7 @@ export function getPublicUrl(publicUrl, req, allowedHosts) {
  * @param {string|string[]} [allowedHosts] - "*" or list of allowed hosts for HNP mitigation.
  * @returns {string[]} An array of tile URL strings.
  */
-export function getTileUrls(
+export function getTileUrls (
   req,
   domains,
   path,
@@ -279,84 +291,80 @@ export function getTileUrls(
   aliases,
   allowedHosts,
 ) {
-  const urlObject = getUrlObject(req);
-  const parsedAllowed = parseAllowedHosts(allowedHosts);
-  const candidateHost = getCandidateHost(req);
-  const hostAllowed = isHostAllowed(candidateHost, parsedAllowed);
-  const safeProtocol = getSafeProtocol(req);
+  const urlObject = getUrlObject(req)
+  const parsedAllowed = parseAllowedHosts(allowedHosts)
+  const candidateHost = getCandidateHost(req)
+  const hostAllowed = isHostAllowed(candidateHost, parsedAllowed)
+  const safeProtocol = getSafeProtocol(req)
 
   if (domains) {
     if (domains.constructor === String && domains.length > 0) {
-      domains = domains.split(',');
+      domains = domains.split(',')
     }
-    const hostParts = urlObject.host.split('.');
-    const relativeSubdomainsUsable =
-      hostParts.length > 1 &&
-      !/^([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?$/.test(urlObject.host);
-    const newDomains = [];
+    const hostParts = urlObject.host.split('.')
+    const relativeSubdomainsUsable = hostParts.length > 1 && !/^([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?$/.test(urlObject.host)
+    const newDomains = []
     for (const domain of domains) {
       if (domain.indexOf('*') !== -1) {
         if (relativeSubdomainsUsable) {
-          const newParts = hostParts.slice(1);
-          newParts.unshift(domain.replace(/\*/g, hostParts[0]));
-          newDomains.push(newParts.join('.'));
+          const newParts = hostParts.slice(1)
+          newParts.unshift(domain.replace(/\*/g, hostParts[0]))
+          newDomains.push(newParts.join('.'))
         }
       } else {
-        newDomains.push(domain);
+        newDomains.push(domain)
       }
     }
-    domains = newDomains;
+    domains = newDomains
   }
-  if (!domains || domains.length == 0) {
-    domains = [urlObject.host];
+  if (!domains || domains.length === 0) {
+    domains = [urlObject.host]
   }
 
-  const queryParams = [];
-  if (req.query.key) {
-    queryParams.push(`key=${encodeURIComponent(req.query.key)}`);
+  const queryParams = []
+  // Embed only non-empty string values; a repeated param parses to an array,
+  // which would otherwise be reflected as "a,b" (see fixUrl).
+  if (typeof req.query.key === 'string' && req.query.key !== '') {
+    queryParams.push(`key=${encodeURIComponent(req.query.key)}`)
   }
-  if (req.query.style) {
-    queryParams.push(`style=${encodeURIComponent(req.query.style)}`);
+  if (typeof req.query.style === 'string' && req.query.style !== '') {
+    queryParams.push(`style=${encodeURIComponent(req.query.style)}`)
   }
-  const query = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
+  const query = queryParams.length > 0 ? `?${queryParams.join('&')}` : ''
 
   // eslint-disable-next-line security/detect-object-injection -- format is validated format string from tileJSON
   if (aliases && aliases[format]) {
     // eslint-disable-next-line security/detect-object-injection -- format is validated format string from tileJSON
-    format = aliases[format];
+    format = aliases[format]
   }
 
-  let tileParams = `{z}/{x}/{y}`;
+  let tileParams = `{z}/{x}/{y}`
   if (tileSize && ['png', 'jpg', 'jpeg', 'webp'].includes(format)) {
-    tileParams = `${tileSize}/{z}/{x}/{y}`;
+    tileParams = `${tileSize}/{z}/{x}/{y}`
   }
 
-  if (format && format != '') {
-    format = `.${format}`;
+  if (format && format !== '') {
+    format = `.${format}`
   } else {
-    format = '';
+    format = ''
   }
 
-  const xForwardedPath = `${req.get('X-Forwarded-Path') ? '/' + req.get('X-Forwarded-Path').replace(/^\/+/, '') : ''}`;
+  const xForwardedPath = `${req.get('X-Forwarded-Path') ? '/' + req.get('X-Forwarded-Path').replace(/^\/+/, '') : ''}`
 
-  const uris = [];
+  const uris = []
   if (!publicUrl) {
     if (!hostAllowed) {
-      uris.push(`${xForwardedPath}/${path}/${tileParams}${format}${query}`);
+      uris.push(`${xForwardedPath}/${path}/${tileParams}${format}${query}`)
     } else {
       for (const domain of domains) {
-        uris.push(
-          `${safeProtocol}://${domain}${xForwardedPath}/${path}/${tileParams}${format}${query}`,
-        );
+        uris.push(`${safeProtocol}://${domain}${xForwardedPath}/${path}/${tileParams}${format}${query}`,)
       }
     }
   } else {
-    uris.push(
-      `${getPublicUrl(publicUrl, req, allowedHosts)}${path}/${tileParams}${format}${query}`,
-    );
+    uris.push(`${getPublicUrl(publicUrl, req, allowedHosts)}${path}/${tileParams}${format}${query}`,)
   }
 
-  return uris;
+  return uris
 }
 
 /**
@@ -364,18 +372,15 @@ export function getTileUrls(
  * @param {object} tileJSON - The tileJSON object to process.
  * @returns {void}
  */
-export function fixTileJSONCenter(tileJSON) {
+export function fixTileJSONCenter (tileJSON) {
   if (tileJSON.bounds && !tileJSON.center) {
-    const fitWidth = 1024;
-    const tiles = fitWidth / 256;
+    const fitWidth = 1024
+    const tiles = fitWidth / 256
     tileJSON.center = [
       (tileJSON.bounds[0] + tileJSON.bounds[2]) / 2,
       (tileJSON.bounds[1] + tileJSON.bounds[3]) / 2,
-      Math.round(
-        -Math.log((tileJSON.bounds[2] - tileJSON.bounds[0]) / 360 / tiles) /
-          Math.LN2,
-      ),
-    ];
+      Math.round(-Math.log((tileJSON.bounds[2] - tileJSON.bounds[0]) / 360 / tiles) / Math.LN2,),
+    ]
   }
 }
 
@@ -384,18 +389,18 @@ export function fixTileJSONCenter(tileJSON) {
  * @param {string} filename - Path to the file to read.
  * @returns {Promise<Buffer>} - A Promise that resolves with the file data as a Buffer or rejects with an error.
  */
-export function readFile(filename) {
+export function readFile (filename) {
   return new Promise((resolve, reject) => {
-    const sanitizedFilename = path.normalize(filename); // Normalize path, remove ..
+    const sanitizedFilename = path.normalize(filename) // Normalize path, remove ..
 
     fs.readFile(String(sanitizedFilename), (err, data) => {
       if (err) {
-        reject(err);
+        reject(err)
       } else {
-        resolve(data);
+        resolve(data)
       }
-    });
-  });
+    })
+  })
 }
 
 /**
@@ -407,81 +412,79 @@ export function readFile(filename) {
  * @param {object} [fallbacks] - Optional fallback font list.
  * @returns {Promise<Buffer>} A promise that resolves with the font data Buffer or rejects with an error.
  */
-async function getFontPbf(allowedFonts, fontPath, name, range, fallbacks) {
+async function getFontPbf (allowedFonts, fontPath, name, range, fallbacks) {
   // eslint-disable-next-line security/detect-object-injection -- name is validated font name from sanitizedName check
   if (!allowedFonts || (allowedFonts[name] && fallbacks)) {
-    const fontMatch = name?.match(/^[\p{L}\p{N} \-_.~!*'()@&=+,#$[\]]+$/u);
-    const sanitizedName = fontMatch?.[0] || 'invalid';
+    const fontMatch = name?.match(/^[\p{L}\p{N} \-_.~!*'()@&=+,#$[\]]+$/u)
+    const sanitizedName = fontMatch?.[0] || 'invalid'
     if (!name || typeof name !== 'string' || name.trim() === '' || !fontMatch) {
-      console.error(
-        'ERROR: Invalid font name: %s',
+      console.error('ERROR: Invalid font name: %s',
         sanitizedName.replace(/\n|\r/g, ''),
-      );
-      throw new Error('Invalid font name');
+      )
+      throw new Error('Invalid font name')
     }
 
-    const rangeMatch = range?.match(/^[\d-]+$/);
-    const sanitizedRange = rangeMatch?.[0] || 'invalid';
+    const rangeMatch = range?.match(/^[\d-]+$/)
+    const sanitizedRange = rangeMatch?.[0] || 'invalid'
     if (!/^\d+-\d+$/.test(range)) {
-      console.error(
-        'ERROR: Invalid range: %s',
+      console.error('ERROR: Invalid range: %s',
         sanitizedRange.replace(/\n|\r/g, ''),
-      );
-      throw new Error('Invalid range');
+      )
+      throw new Error('Invalid range')
     }
-    const filename = path.join(
-      fontPath,
-      sanitizedName,
-      `${sanitizedRange}.pbf`,
-    );
+    const filename = path.join(fontPath, sanitizedName, `${sanitizedRange}.pbf`,)
+
+    // The charset above permits ".", so a fontstack of ".." (or any ".." segment) makes path.join climb out of the fonts directory.
+    // "/" and "\" are rejected so only a lone ".." can traverse, but verify containment explicitly rather than rely on the regex.
+    const fontRoot = path.resolve(fontPath)
+    const resolved = path.resolve(filename)
+    if (resolved !== fontRoot && !resolved.startsWith(fontRoot + path.sep)) {
+      console.error('ERROR: Invalid font name: %s', sanitizedName.replace(/\n|\r/g, ''),)
+      throw new Error('Invalid font name')
+    }
 
     if (!fallbacks) {
-      fallbacks = clone(allowedFonts || {});
+      fallbacks = clone(allowedFonts || {})
     }
     // eslint-disable-next-line security/detect-object-injection -- name is validated font name
-    delete fallbacks[name];
+    delete fallbacks[name]
 
     try {
-      const data = await readFile(filename);
-      return data;
+      return await readFile(filename)
     } catch (err) {
-      console.error(
-        'ERROR: Font not found: %s, Error: %s',
+      console.error('ERROR: Font not found: %s, Error: %s',
         filename.replace(/\n|\r/g, ''),
         String(err),
-      );
+      )
       if (fallbacks && Object.keys(fallbacks).length) {
-        let fallbackName;
+        let fallbackName
 
-        let fontStyle = name.split(' ').pop();
+        let fontStyle = name.split(' ').pop()
         if (['Regular', 'Bold', 'Italic'].indexOf(fontStyle) < 0) {
-          fontStyle = 'Regular';
+          fontStyle = 'Regular'
         }
-        fallbackName = `Noto Sans ${fontStyle}`;
+        fallbackName = `Noto Sans ${fontStyle}`
         // eslint-disable-next-line security/detect-object-injection -- fallbackName is constructed from validated font style
         if (!fallbacks[fallbackName]) {
-          fallbackName = `Open Sans ${fontStyle}`;
+          fallbackName = `Open Sans ${fontStyle}`
           // eslint-disable-next-line security/detect-object-injection -- fallbackName is constructed from validated font style
           if (!fallbacks[fallbackName]) {
-            fallbackName = Object.keys(fallbacks)[0];
+            fallbackName = Object.keys(fallbacks)[0]
           }
         }
-        console.error(
-          `ERROR: Trying to use %s as a fallback for: %s`,
-          fallbackName,
-          sanitizedName,
-        );
+        console.error(`ERROR: Trying to use %s as a fallback for: %s`, fallbackName, sanitizedName,)
         // eslint-disable-next-line security/detect-object-injection -- fallbackName is constructed from validated font style
-        delete fallbacks[fallbackName];
-        return getFontPbf(null, fontPath, fallbackName, range, fallbacks);
+        delete fallbacks[fallbackName]
+        return getFontPbf(null, fontPath, fallbackName, range, fallbacks)
       } else {
-        throw new Error('Font load error', { cause: err });
+        throw new Error('Font load error', { cause: err })
       }
     }
   } else {
-    throw new Error('Font not allowed');
+    throw new Error('Font not allowed')
   }
 }
+
 /**
  * Combines multiple font pbf buffers into one.
  * @param {object} allowedFonts - An object of allowed fonts.
@@ -491,29 +494,23 @@ async function getFontPbf(allowedFonts, fontPath, name, range, fallbacks) {
  * @param {object} [fallbacks] - Fallback font list.
  * @returns {Promise<Buffer>} - A promise that resolves to the combined font data buffer.
  */
-export async function getFontsPbf(
+export async function getFontsPbf (
   allowedFonts,
   fontPath,
   names,
   range,
   fallbacks,
 ) {
-  const fonts = names.split(',');
-  const queue = [];
+  const fonts = names.split(',')
+  const queue = []
   for (const font of fonts) {
     queue.push(
-      getFontPbf(
-        allowedFonts,
-        fontPath,
-        font,
-        range,
-        clone(allowedFonts || fallbacks),
-      ),
-    );
+      getFontPbf(allowedFonts, fontPath, font, range, clone(allowedFonts || fallbacks),),
+    )
   }
 
-  const combined = combine(await Promise.all(queue), names);
-  return Buffer.from(combined.buffer, 0, combined.buffer.length);
+  const combined = combine(await Promise.all(queue), names)
+  return Buffer.from(combined.buffer, 0, combined.buffer.length)
 }
 
 /**
@@ -521,21 +518,18 @@ export async function getFontsPbf(
  * @param {string} fontPath - The path to the font directory.
  * @returns {Promise<object>} - Promise that resolves with an object where keys are the font names.
  */
-export async function listFonts(fontPath) {
-  const existingFonts = {};
+export async function listFonts (fontPath) {
+  const existingFonts = {}
 
-  const files = await fsPromises.readdir(fontPath);
+  const files = await fsPromises.readdir(fontPath)
   for (const file of files) {
-    const stats = await fsPromises.stat(path.join(fontPath, file));
-    if (
-      stats.isDirectory() &&
-      (await existsP(path.join(fontPath, file, '0-255.pbf')))
-    ) {
-      existingFonts[path.basename(file)] = true;
+    const stats = await fsPromises.stat(path.join(fontPath, file))
+    if (stats.isDirectory() && (await existsP(path.join(fontPath, file, '0-255.pbf')))) {
+      existingFonts[path.basename(file)] = true
     }
   }
 
-  return existingFonts;
+  return existingFonts
 }
 
 /**
@@ -543,11 +537,11 @@ export async function listFonts(fontPath) {
  * @param {string} string - The string to check.
  * @returns {boolean} - True if the string is a valid HTTP/HTTPS URL.
  */
-export function isValidHttpUrl(string) {
+export function isValidHttpUrl (string) {
   try {
-    return httpTester.test(string);
+    return httpTester.test(string)
   } catch {
-    return false;
+    return false
   }
 }
 
@@ -556,11 +550,11 @@ export function isValidHttpUrl(string) {
  * @param {string} string - The string to check.
  * @returns {boolean} - True if the string is a valid S3 URL.
  */
-export function isS3Url(string) {
+export function isS3Url (string) {
   try {
-    return s3Tester.test(string) || s3HttpTester.test(string);
+    return s3Tester.test(string) || s3HttpTester.test(string)
   } catch {
-    return false;
+    return false
   }
 }
 
@@ -569,15 +563,15 @@ export function isS3Url(string) {
  * @param {string} string - The string to check.
  * @returns {boolean} - True if the string is a valid remote URL.
  */
-export function isValidRemoteUrl(string) {
+export function isValidRemoteUrl (string) {
   try {
     return (
       httpTester.test(string) ||
       s3Tester.test(string) ||
       s3HttpTester.test(string)
-    );
+    )
   } catch {
-    return false;
+    return false
   }
 }
 
@@ -586,11 +580,11 @@ export function isValidRemoteUrl(string) {
  * @param {string} string - The string to check.
  * @returns {boolean} - True if the string uses pmtiles:// protocol.
  */
-export function isPMTilesProtocol(string) {
+export function isPMTilesProtocol (string) {
   try {
-    return pmtilesTester.test(string);
+    return pmtilesTester.test(string)
   } catch {
-    return false;
+    return false
   }
 }
 
@@ -599,11 +593,11 @@ export function isPMTilesProtocol(string) {
  * @param {string} string - The string to check.
  * @returns {boolean} - True if the string uses mbtiles:// protocol.
  */
-export function isMBTilesProtocol(string) {
+export function isMBTilesProtocol (string) {
   try {
-    return mbtilesTester.test(string);
+    return mbtilesTester.test(string)
   } catch {
-    return false;
+    return false
   }
 }
 
@@ -615,25 +609,24 @@ export function isMBTilesProtocol(string) {
  * @param {number} tileSize - Size of the tile in pixels (e.g., 256 or 512).
  * @returns {{tileX: number, tileY: number, pixelX: number, pixelY: number}} - Tile and pixel coordinates.
  */
-export function lonLatToTilePixel(lon, lat, zoom, tileSize) {
-  let siny = Math.sin((lat * Math.PI) / 180);
+export function lonLatToTilePixel (lon, lat, zoom, tileSize) {
+  let siny = Math.sin((lat * Math.PI) / 180)
   // Truncating to 0.9999 effectively limits latitude to 89.189. This is
   // about a third of a tile past the edge of the world tile.
-  siny = Math.min(Math.max(siny, -0.9999), 0.9999);
+  siny = Math.min(Math.max(siny, -0.9999), 0.9999)
 
-  const xWorld = tileSize * (0.5 + lon / 360);
-  const yWorld =
-    tileSize * (0.5 - Math.log((1 + siny) / (1 - siny)) / (4 * Math.PI));
+  const xWorld = tileSize * (0.5 + lon / 360)
+  const yWorld = tileSize * (0.5 - Math.log((1 + siny) / (1 - siny)) / (4 * Math.PI))
 
-  const scale = 1 << zoom;
+  const scale = 1 << zoom
 
-  const tileX = Math.floor((xWorld * scale) / tileSize);
-  const tileY = Math.floor((yWorld * scale) / tileSize);
+  const tileX = Math.floor((xWorld * scale) / tileSize)
+  const tileY = Math.floor((yWorld * scale) / tileSize)
 
-  const pixelX = Math.floor(xWorld * scale) - tileX * tileSize;
-  const pixelY = Math.floor(yWorld * scale) - tileY * tileSize;
+  const pixelX = Math.floor(xWorld * scale) - tileX * tileSize
+  const pixelY = Math.floor(yWorld * scale) - tileY * tileSize
 
-  return { tileX, tileY, pixelX, pixelY };
+  return { tileX, tileY, pixelX, pixelY }
 }
 
 /**
@@ -645,25 +638,27 @@ export function lonLatToTilePixel(lon, lat, zoom, tileSize) {
  * @param {number} y - The y coordinate of the tile.
  * @returns {Promise<object | null>} - A promise that resolves to an object with data and headers or null if no data is found.
  */
-export async function fetchTileData(source, sourceType, z, x, y) {
+export async function fetchTileData (source, sourceType, z, x, y) {
   if (sourceType === 'pmtiles') {
     try {
-      const tileinfo = await getPMtilesTile(source, z, x, y);
-      if (!tileinfo?.data) return null;
-      return { data: tileinfo.data, headers: tileinfo.header };
+      const tileInfo = await getPMtilesTile(source, z, x, y)
+      if (!tileInfo?.data) {
+        return null
+      }
+      return { data: tileInfo.data, headers: tileInfo.header }
     } catch (error) {
-      console.error('Error fetching PMTiles tile:', error);
-      return null;
+      console.error('Error fetching PMTiles tile:', error)
+      return null
     }
   } else if (sourceType === 'mbtiles') {
     return new Promise((resolve) => {
       source.getTile(z, x, y, (err, tileData, tileHeader) => {
         if (err || tileData == null) {
-          return resolve(null);
+          return resolve(null)
         }
-        resolve({ data: tileData, headers: tileHeader });
-      });
-    });
+        resolve({ data: tileData, headers: tileHeader })
+      })
+    })
   }
 }
 
@@ -681,7 +676,7 @@ const defaultCacheControl = {
   metadata: 'public, max-age=3600',
   static: 'public, max-age=86400',
   html: 'no-cache',
-};
+}
 
 /**
  * Resolves the Cache-Control header for a category of response.
@@ -693,21 +688,21 @@ const defaultCacheControl = {
  * @param {string} category - One of tile, asset, metadata, static, html.
  * @returns {string|null} - Header value, or null when no header should be set.
  */
-export function getCacheControl(options, category) {
-  const configured = options?.cacheControl;
+export function getCacheControl (options, category) {
+  const configured = options?.cacheControl
   if (configured === false) {
-    return null;
+    return null
   }
   // eslint-disable-next-line security/detect-object-injection -- category is an internal literal, not user input
-  const override = configured?.[category];
+  const override = configured?.[category]
   if (override === false || override === null) {
-    return null;
+    return null
   }
   if (typeof override === 'string') {
-    return override;
+    return override
   }
   // eslint-disable-next-line security/detect-object-injection -- category is an internal literal, not user input
-  return defaultCacheControl[category] ?? null;
+  return defaultCacheControl[category] ?? null
 }
 
 /**
@@ -717,9 +712,72 @@ export function getCacheControl(options, category) {
  * @param {string} category - One of tile, asset, metadata, static, html.
  * @returns {void}
  */
-export function setCacheControl(res, options, category) {
-  const value = getCacheControl(options, category);
+export function setCacheControl (res, options, category) {
+  const value = getCacheControl(options, category)
   if (value) {
-    res.set('Cache-Control', value);
+    res.set('Cache-Control', value)
+  }
+}
+
+/**
+ * Request headers that change the absolute URLs embedded in a host-derived
+ * response body (the tile/sprite/glyph links in style.json and TileJSON). A
+ * shared cache keys on the URL alone, so unless it also keys on these headers a
+ * response built from an attacker's X-Forwarded-* values can be stored under the
+ * plain URL and served to every other client — redirecting their map (and
+ * `?key=`) traffic to an attacker host.
+ */
+const HOST_DERIVED_VARY = [
+  'X-Forwarded-Host',
+  'X-Forwarded-Proto',
+  'X-Forwarded-Protocol',
+  'X-Forwarded-Port',
+  'X-Forwarded-Path',
+]
+
+/**
+ * Whether the public URLs embedded in a response are pinned to server config rather than derived from mutable request headers.
+ * Pinned when an explicit publicUrl is configured, or when allowedHosts restricts the reflected host to a known allowlist (so it cannot be attacker-chosen).
+ * @param {string} [publicUrl] - Configured public URL, if any.
+ * @param {string|string[]} [allowedHosts] - allowedHosts config.
+ * @returns {boolean} - True when the embedded host is not attacker-controllable.
+ */
+function hostUrlsArePinned (publicUrl, allowedHosts) {
+  if (publicUrl) {
+    return true
+  }
+  return parseAllowedHosts(allowedHosts) !== '*'
+}
+
+/**
+ * Sets Cache-Control for a response whose body embeds request-host-derived absolute URLs.
+ * Always adds a Vary on the forwarded headers so a compliant shared cache keys on them; and when the reflected host is
+ * attacker-controllable (no publicUrl and allowedHosts is the default "*"), downgrades a shared-cacheable directive to
+ * `private` so a shared cache cannot serve one client's (or an attacker's) host back to another.
+ * Configuring publicUrl or TILESERVER_GL_ALLOWED_HOSTS pins the host and restores public caching.
+ * @param {object} res - Express response object.
+ * @param {object} options - The `options` block from the config file.
+ * @param {string} category - Cache-Control category (e.g. 'metadata').
+ * @param {object} [ctx] - Host-pinning context.
+ * @param {string} [ctx.publicUrl] - Configured public URL, if any.
+ * @param {string|string[]} [ctx.allowedHosts] - allowedHosts config.
+ * @returns {void}
+ */
+export function setHostDerivedCacheControl (
+  res,
+  options,
+  category,
+  { publicUrl, allowedHosts } = {},
+) {
+  res.vary(HOST_DERIVED_VARY)
+  let value = getCacheControl(options, category)
+  if (value && !hostUrlsArePinned(publicUrl, allowedHosts)) {
+    value = value.replace(/\bpublic\b/g, 'private')
+    if (!/\b(private|no-store)\b/.test(value)) {
+      value = `private, ${value}`
+    }
+  }
+  if (value) {
+    res.set('Cache-Control', value)
   }
 }
