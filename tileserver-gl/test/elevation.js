@@ -377,8 +377,8 @@ describe('Elevation API', function () {
               { lon: 45.5, lat: 45.5, z: 1 }, // top-right: 500m
               { lon: -45.5, lat: 45.5, z: 1 }, // top-left: 200m
               { lon: -45.5, lat: -45.5, z: 1 }, // bottom-left: 1000m
-              { lon: 45.5, lat: -45.5, z: 1 }, // bottom-right: 2500m
-            ],
+              { lon: 45.5, lat: -45.5, z: 1 } // bottom-right: 2500m
+            ]
           })
           .expect(200)
           .expect('Content-Type', /application\/json/)
@@ -400,8 +400,8 @@ describe('Elevation API', function () {
             points: [
               { lon: 45.5, lat: 45.5, z: 1 }, // top-right tile
               { lon: 90, lat: 30, z: 1 }, // also top-right tile
-              { lon: 10, lat: 10, z: 1 }, // also top-right tile
-            ],
+              { lon: 10, lat: 10, z: 1 } // also top-right tile
+            ]
           })
           .expect(200)
           .expect('Content-Type', /application\/json/)
@@ -422,8 +422,8 @@ describe('Elevation API', function () {
           .send({
             points: [
               { lon: 45.5, lat: 45.5, z: 0 }, // zoom 0: 100m (whole world)
-              { lon: 45.5, lat: 45.5, z: 1 }, // zoom 1: 500m (top-right)
-            ],
+              { lon: 45.5, lat: 45.5, z: 1 } // zoom 1: 500m (top-right)
+            ]
           })
           .expect(200)
           .expect(function (res) {
@@ -439,7 +439,7 @@ describe('Elevation API', function () {
         supertest(app)
           .post('/data/terrain/elevation')
           .send({
-            points: [{ lon: 45.5, lat: 45.5, z: 20 }], // maxzoom is 1
+            points: [{ lon: 45.5, lat: 45.5, z: 20 }] // maxzoom is 1
           })
           .expect(200)
           .expect(function (res) {
@@ -453,7 +453,7 @@ describe('Elevation API', function () {
         supertest(app)
           .post('/data/terrain/elevation')
           .send({
-            points: [{ lon: 45.5, lat: 45.5, z: -5 }], // minzoom is 0
+            points: [{ lon: 45.5, lat: 45.5, z: -5 }] // minzoom is 0
           })
           .expect(200)
           .expect(function (res) {
@@ -468,7 +468,7 @@ describe('Elevation API', function () {
         supertest(app)
           .post('/data/terrain/elevation')
           .send({
-            points: [{ lon: 'invalid', lat: 45.5, z: 1 }],
+            points: [{ lon: 'invalid', lat: 45.5, z: 1 }]
           })
           .expect(400)
           .end(done);

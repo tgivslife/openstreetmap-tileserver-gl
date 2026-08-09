@@ -13,7 +13,7 @@ const CONSTANTS = {
   DEFAULT_STROKE_COLOR: 'rgba(0,64,255,0.7)',
   MAX_LINE_WIDTH: 500,
   MAX_BORDER_WIDTH: 250,
-  MARKER_LOAD_TIMEOUT: 5000,
+  MARKER_LOAD_TIMEOUT: 5000
 }
 
 /**
@@ -62,7 +62,7 @@ const isValidColor = (color) => {
     'pink',
     'brown',
     'cyan',
-    'magenta',
+    'magenta'
   ]
 
   return (
@@ -86,7 +86,7 @@ const safeParseNumber = (
   value,
   defaultValue,
   min = -Infinity,
-  max = Infinity,
+  max = Infinity
 ) => {
   const parsed = Number(value)
   if (isNaN(parsed)) {
@@ -134,7 +134,7 @@ const drawMarker = (ctx, marker, z) => {
 
       return {
         x: xCoordinate,
-        y: yCoordinate,
+        y: yCoordinate
       }
     }
 
@@ -293,14 +293,14 @@ const drawPath = (ctx, path, query, pathQuery, z) => {
       inlineWidth,
       CONSTANTS.DEFAULT_LINE_WIDTH,
       0,
-      CONSTANTS.MAX_LINE_WIDTH,
+      CONSTANTS.MAX_LINE_WIDTH
     )
   } else if ('width' in query) {
     lineWidth = safeParseNumber(
       query.width,
       CONSTANTS.DEFAULT_LINE_WIDTH,
       0,
-      CONSTANTS.MAX_LINE_WIDTH,
+      CONSTANTS.MAX_LINE_WIDTH
     )
   }
 
@@ -312,14 +312,14 @@ const drawPath = (ctx, path, query, pathQuery, z) => {
       inlineBorderWidth,
       borderWidth,
       0,
-      CONSTANTS.MAX_BORDER_WIDTH,
+      CONSTANTS.MAX_BORDER_WIDTH
     )
   } else if (query.borderwidth !== undefined) {
     borderWidth = safeParseNumber(
       query.borderwidth,
       borderWidth,
       0,
-      CONSTANTS.MAX_BORDER_WIDTH,
+      CONSTANTS.MAX_BORDER_WIDTH
     )
   }
 
@@ -406,7 +406,7 @@ export const renderOverlay = async (
   scale,
   paths,
   markers,
-  query,
+  query
 ) => {
   if ((!paths || paths.length === 0) && (!markers || markers.length === 0)) {
     return null
@@ -503,7 +503,7 @@ export const renderAttribution = (width, height, scale, text) => {
     width - textWidth - padding,
     height - textHeight - padding,
     textWidth + padding,
-    textHeight + padding,
+    textHeight + padding
   )
   ctx.fillStyle = 'rgba(0,0,0,.8)'
   ctx.fillText(text, width - textWidth - padding / 2, height - textHeight + 8)

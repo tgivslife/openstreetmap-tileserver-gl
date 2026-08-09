@@ -51,7 +51,7 @@ export async function serve_font (options, allowedFonts, programOpts) {
     }
 
     if (verbose >= 1) {
-      console.log(`Handling font request for: /fonts/%s/%s.pbf`, sFontStack, sRange,)
+      console.log(`Handling font request for: /fonts/%s/%s.pbf`, sFontStack, sRange)
     }
 
     const modifiedSince = req.get('if-modified-since')
@@ -73,7 +73,7 @@ export async function serve_font (options, allowedFonts, programOpts) {
         console.log(
           'Skipping out-of-range glyph request: /fonts/%s/%s.pbf',
           sFontStack,
-          sRange,
+          sRange
         )
       }
       return res
@@ -88,7 +88,7 @@ export async function serve_font (options, allowedFonts, programOpts) {
         fontPath,
         sFontStack,
         sRange,
-        existingFonts,
+        existingFonts
       )
       res.header('Content-type', 'application/x-protobuf')
       res.header('Last-Modified', lastModified)
@@ -98,7 +98,7 @@ export async function serve_font (options, allowedFonts, programOpts) {
       }
       return res.send(concatenated)
     } catch (err) {
-      console.error(`Error serving font: %s/%s.pbf, Error: %s`, sFontStack, sRange, String(err),)
+      console.error(`Error serving font: %s/%s.pbf, Error: %s`, sFontStack, sRange, String(err))
       return res.status(400).header('Content-Type', 'text/plain').send('Error serving font')
     }
   })
@@ -116,7 +116,7 @@ export async function serve_font (options, allowedFonts, programOpts) {
     res.header('Content-type', 'application/json')
     setCacheControl(res, options, 'metadata')
     return res.send(
-      Object.keys(options.serveAllFonts ? existingFonts : allowedFonts).sort(),
+      Object.keys(options.serveAllFonts ? existingFonts : allowedFonts).sort()
     )
   })
 

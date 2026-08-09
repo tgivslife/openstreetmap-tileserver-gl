@@ -289,7 +289,7 @@ export function getTileUrls (
   format,
   publicUrl,
   aliases,
-  allowedHosts,
+  allowedHosts
 ) {
   const urlObject = getUrlObject(req)
   const parsedAllowed = parseAllowedHosts(allowedHosts)
@@ -357,11 +357,11 @@ export function getTileUrls (
       uris.push(`${xForwardedPath}/${path}/${tileParams}${format}${query}`)
     } else {
       for (const domain of domains) {
-        uris.push(`${safeProtocol}://${domain}${xForwardedPath}/${path}/${tileParams}${format}${query}`,)
+        uris.push(`${safeProtocol}://${domain}${xForwardedPath}/${path}/${tileParams}${format}${query}`)
       }
     }
   } else {
-    uris.push(`${getPublicUrl(publicUrl, req, allowedHosts)}${path}/${tileParams}${format}${query}`,)
+    uris.push(`${getPublicUrl(publicUrl, req, allowedHosts)}${path}/${tileParams}${format}${query}`)
   }
 
   return uris
@@ -379,7 +379,7 @@ export function fixTileJSONCenter (tileJSON) {
     tileJSON.center = [
       (tileJSON.bounds[0] + tileJSON.bounds[2]) / 2,
       (tileJSON.bounds[1] + tileJSON.bounds[3]) / 2,
-      Math.round(-Math.log((tileJSON.bounds[2] - tileJSON.bounds[0]) / 360 / tiles) / Math.LN2,),
+      Math.round(-Math.log((tileJSON.bounds[2] - tileJSON.bounds[0]) / 360 / tiles) / Math.LN2)
     ]
   }
 }
@@ -419,7 +419,7 @@ async function getFontPbf (allowedFonts, fontPath, name, range, fallbacks) {
     const sanitizedName = fontMatch?.[0] || 'invalid'
     if (!name || typeof name !== 'string' || name.trim() === '' || !fontMatch) {
       console.error('ERROR: Invalid font name: %s',
-        sanitizedName.replace(/\n|\r/g, ''),
+        sanitizedName.replace(/\n|\r/g, '')
       )
       throw new Error('Invalid font name')
     }
@@ -428,18 +428,18 @@ async function getFontPbf (allowedFonts, fontPath, name, range, fallbacks) {
     const sanitizedRange = rangeMatch?.[0] || 'invalid'
     if (!/^\d+-\d+$/.test(range)) {
       console.error('ERROR: Invalid range: %s',
-        sanitizedRange.replace(/\n|\r/g, ''),
+        sanitizedRange.replace(/\n|\r/g, '')
       )
       throw new Error('Invalid range')
     }
-    const filename = path.join(fontPath, sanitizedName, `${sanitizedRange}.pbf`,)
+    const filename = path.join(fontPath, sanitizedName, `${sanitizedRange}.pbf`)
 
     // The charset above permits ".", so a fontstack of ".." (or any ".." segment) makes path.join climb out of the fonts directory.
     // "/" and "\" are rejected so only a lone ".." can traverse, but verify containment explicitly rather than rely on the regex.
     const fontRoot = path.resolve(fontPath)
     const resolved = path.resolve(filename)
     if (resolved !== fontRoot && !resolved.startsWith(fontRoot + path.sep)) {
-      console.error('ERROR: Invalid font name: %s', sanitizedName.replace(/\n|\r/g, ''),)
+      console.error('ERROR: Invalid font name: %s', sanitizedName.replace(/\n|\r/g, ''))
       throw new Error('Invalid font name')
     }
 
@@ -454,7 +454,7 @@ async function getFontPbf (allowedFonts, fontPath, name, range, fallbacks) {
     } catch (err) {
       console.error('ERROR: Font not found: %s, Error: %s',
         filename.replace(/\n|\r/g, ''),
-        String(err),
+        String(err)
       )
       if (fallbacks && Object.keys(fallbacks).length) {
         let fallbackName
@@ -472,7 +472,7 @@ async function getFontPbf (allowedFonts, fontPath, name, range, fallbacks) {
             fallbackName = Object.keys(fallbacks)[0]
           }
         }
-        console.error(`ERROR: Trying to use %s as a fallback for: %s`, fallbackName, sanitizedName,)
+        console.error(`ERROR: Trying to use %s as a fallback for: %s`, fallbackName, sanitizedName)
         // eslint-disable-next-line security/detect-object-injection -- fallbackName is constructed from validated font style
         delete fallbacks[fallbackName]
         return getFontPbf(null, fontPath, fallbackName, range, fallbacks)
@@ -499,13 +499,13 @@ export async function getFontsPbf (
   fontPath,
   names,
   range,
-  fallbacks,
+  fallbacks
 ) {
   const fonts = names.split(',')
   const queue = []
   for (const font of fonts) {
     queue.push(
-      getFontPbf(allowedFonts, fontPath, font, range, clone(allowedFonts || fallbacks),),
+      getFontPbf(allowedFonts, fontPath, font, range, clone(allowedFonts || fallbacks))
     )
   }
 
@@ -675,7 +675,7 @@ const defaultCacheControl = {
   asset: 'public, max-age=31536000, immutable',
   metadata: 'public, max-age=3600',
   static: 'public, max-age=86400',
-  html: 'no-cache',
+  html: 'no-cache'
 }
 
 /**
@@ -732,7 +732,7 @@ const HOST_DERIVED_VARY = [
   'X-Forwarded-Proto',
   'X-Forwarded-Protocol',
   'X-Forwarded-Port',
-  'X-Forwarded-Path',
+  'X-Forwarded-Path'
 ]
 
 /**
@@ -767,7 +767,7 @@ export function setHostDerivedCacheControl (
   res,
   options,
   category,
-  { publicUrl, allowedHosts } = {},
+  { publicUrl, allowedHosts } = {}
 ) {
   res.vary(HOST_DERIVED_VARY)
   let value = getCacheControl(options, category)

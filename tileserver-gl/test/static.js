@@ -27,7 +27,7 @@ describe('Static endpoints', function () {
           'png',
           200,
           undefined,
-          /image\/png/,
+          /image\/png/
         );
         testStatic(
           prefix,
@@ -35,7 +35,7 @@ describe('Static endpoints', function () {
           'jpg',
           200,
           undefined,
-          /image\/jpeg/,
+          /image\/jpeg/
         );
         testStatic(
           prefix,
@@ -43,7 +43,7 @@ describe('Static endpoints', function () {
           'jpeg',
           200,
           undefined,
-          /image\/jpeg/,
+          /image\/jpeg/
         );
         testStatic(
           prefix,
@@ -51,7 +51,7 @@ describe('Static endpoints', function () {
           'webp',
           200,
           undefined,
-          /image\/webp/,
+          /image\/webp/
         );
       });
 
@@ -97,7 +97,7 @@ describe('Static endpoints', function () {
           'png',
           200,
           undefined,
-          /image\/png/,
+          /image\/png/
         );
         testStatic(
           prefix,
@@ -105,7 +105,7 @@ describe('Static endpoints', function () {
           'jpg',
           200,
           undefined,
-          /image\/jpeg/,
+          /image\/jpeg/
         );
         testStatic(
           prefix,
@@ -113,7 +113,7 @@ describe('Static endpoints', function () {
           'jpeg',
           200,
           undefined,
-          /image\/jpeg/,
+          /image\/jpeg/
         );
         testStatic(
           prefix,
@@ -121,7 +121,7 @@ describe('Static endpoints', function () {
           'webp',
           200,
           undefined,
-          /image\/webp/,
+          /image\/webp/
         );
       });
 
@@ -151,7 +151,7 @@ describe('Static endpoints', function () {
         200,
         undefined,
         /image\/png/,
-        '?path=10,10|20,20',
+        '?path=10,10|20,20'
       );
 
       describe('different parameters', function () {
@@ -162,7 +162,7 @@ describe('Static endpoints', function () {
           200,
           2,
           /image\/png/,
-          '?path=10,10|20,20',
+          '?path=10,10|20,20'
         );
         testStatic(
           prefix,
@@ -171,7 +171,7 @@ describe('Static endpoints', function () {
           200,
           3,
           /image\/png/,
-          '?path=-10,-10|-20,-20',
+          '?path=-10,-10|-20,-20'
         );
       });
 
@@ -183,7 +183,7 @@ describe('Static endpoints', function () {
           200,
           2,
           /image\/png/,
-          '?path=' + encodeURIComponent('enc:{{biGwvyGoUi@s_A|{@'),
+          '?path=' + encodeURIComponent('enc:{{biGwvyGoUi@s_A|{@')
         );
       });
     });
@@ -197,7 +197,7 @@ describe('Static endpoints', function () {
         400,
         undefined,
         undefined,
-        '?path=invalid',
+        '?path=invalid'
       );
       testStatic(
         prefix,
@@ -206,7 +206,7 @@ describe('Static endpoints', function () {
         400,
         undefined,
         undefined,
-        '?path=10,10|20,20',
+        '?path=10,10|20,20'
       );
     });
   });
@@ -228,7 +228,7 @@ describe('Static endpoints', function () {
       it('POST with long path in body succeeds (avoids URL length limit)', function (done) {
         const manyCoords = Array.from(
           { length: 200 },
-          (_, i) => `${10 + i * 0.1},${20 + i * 0.1}`,
+          (_, i) => `${10 + i * 0.1},${20 + i * 0.1}`
         ).join('|');
         supertest(app)
           .post(staticAutoPath)
@@ -314,7 +314,7 @@ describe('Static endpoints', function () {
       const query = {
         path: ['10,10|20,20', '10,20|20,10'],
         marker: ['10,15', '20,15'],
-        latlng: '',
+        latlng: ''
       };
       const result = getSecureMergedParams(query, {});
 
@@ -327,7 +327,7 @@ describe('Static endpoints', function () {
       const body = {
         path: ['10,20|20,10', '10,10|20,20'],
         marker: ['20,15', '10,15'],
-        latlng: '',
+        latlng: ''
       };
       const result = getSecureMergedParams({}, body);
 
@@ -352,7 +352,7 @@ describe('Static endpoints', function () {
       assert.deepStrictEqual(result.path, [
         '10,10|20,20',
         '10,20|20,10',
-        '10,10|15,20|20,10',
+        '10,10|15,20|20,10'
       ]);
     });
 
@@ -365,7 +365,7 @@ describe('Static endpoints', function () {
         '10,10|20,20',
         '10,20|20,10',
         '10,10|15,20|20,10',
-        '5,5|10,10',
+        '5,5|10,10'
       ]);
     });
 
@@ -381,7 +381,7 @@ describe('Static endpoints', function () {
       const body = { path: { lat: 10, lon: 10 } };
       assert.throws(
         () => getSecureMergedParams({}, body),
-        /nested objects are not allowed/,
+        /nested objects are not allowed/
       );
     });
 
@@ -404,7 +404,7 @@ describe('Static endpoints', function () {
         .expect((res) => {
           // secure-json-parse error message usually contains these terms
           assert.ok(
-            res.text.includes('Invalid JSON') || res.text.includes('forbidden'),
+            res.text.includes('Invalid JSON') || res.text.includes('forbidden')
           );
         })
         .end(done);

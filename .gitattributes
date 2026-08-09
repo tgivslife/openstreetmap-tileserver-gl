@@ -7,3 +7,21 @@
 Dockerfile* text eol=lf
 *.yml text eol=lf
 *.json text eol=lf
+
+# Binary assets — NEVER apply EOL/CRLF conversion. With core.autocrlf=true, git
+# otherwise treats these as text and rewrites embedded 0x0A bytes to 0x0D0A on
+# checkout, injecting bytes into the middle of the file and corrupting it (a
+# 625-byte glyph PBF became 627 bytes and undecodable this way). `binary` is the
+# built-in macro for `-text -diff`, so bytes are preserved exactly.
+*.pbf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.mbtiles binary
+*.pmtiles binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary

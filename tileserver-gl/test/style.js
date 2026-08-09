@@ -6,7 +6,7 @@ const testIs = function (url, type, status) {
         .get(url)
         .expect(status || 200)
         .expect('Content-Type', type, done);
-    },
+    }
   );
 };
 
@@ -46,7 +46,7 @@ describe('Styles', function () {
     testIs('/styles/' + prefix + '/sprite/default.json', /application\/json/);
     testIs(
       '/styles/' + prefix + '/sprite/default@2x.json',
-      /application\/json/,
+      /application\/json/
     );
     testIs('/styles/' + prefix + '/sprite/default.png', /image\/png/);
     testIs('/styles/' + prefix + '/sprite/default@2x.png', /image\/png/);
@@ -94,7 +94,7 @@ describe('Fonts', function () {
   testIs('/fonts/Open Sans Regular/65280-65535.pbf', /application\/x-protobuf/);
   testIs(
     '/fonts/Open Sans Bold,Open Sans Regular/0-255.pbf',
-    /application\/x-protobuf/,
+    /application\/x-protobuf/
   );
   testIs('/fonts/Nonsense,Open Sans Bold/0-255.pbf', /./, 400);
 

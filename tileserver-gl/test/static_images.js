@@ -22,78 +22,78 @@ const tests = [
   {
     name: 'static-lat-lng',
     // Test default center format (lng,lat,zoom)
-    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png',
+    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png'
   },
   {
     name: 'static-bearing',
     // Test map bearing (rotation) at 180 degrees
-    url: '/styles/test-style/static/8.5375,47.379,12@180/400x300.png',
+    url: '/styles/test-style/static/8.5375,47.379,12@180/400x300.png'
   },
   {
     name: 'static-bearing-pitch',
     // Test map bearing and pitch (3D tilt)
-    url: '/styles/test-style/static/8.5375,47.379,12@15,80/400x300.png',
+    url: '/styles/test-style/static/8.5375,47.379,12@15,80/400x300.png'
   },
   {
     name: 'static-pixel-ratio-2x',
     // Test high-DPI rendering using @2x scale
-    url: '/styles/test-style/static/8.5375,47.379,11/200x150@2x.png',
+    url: '/styles/test-style/static/8.5375,47.379,11/200x150@2x.png'
   },
   {
     name: 'path-auto',
     // Test path rendering with simple coordinates and auto-centering
-    url: '/styles/test-style/static/auto/400x300.png?fill=%23ff000080&path=8.53180,47.38713|8.53841,47.38248|8.53320,47.37457',
+    url: '/styles/test-style/static/auto/400x300.png?fill=%23ff000080&path=8.53180,47.38713|8.53841,47.38248|8.53320,47.37457'
   },
   {
     name: 'encoded-path-auto',
     // Test path rendering using encoded polyline and auto-centering
-    url: '/styles/test-style/static/auto/400x300.png?stroke=red&width=5&path=enc:wwg`Hyu}r@fNgn@hKyh@rR{ZlP{YrJmM`PJhNbH`P`VjUbNfJ|LzM~TtLnKxQZ',
+    url: '/styles/test-style/static/auto/400x300.png?stroke=red&width=5&path=enc:wwg`Hyu}r@fNgn@hKyh@rR{ZlP{YrJmM`PJhNbH`P`VjUbNfJ|LzM~TtLnKxQZ'
   },
   {
     name: 'linecap-linejoin-round-round',
     // Test custom line styling: round linejoin and round linecap
-    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?width=30&linejoin=round&linecap=round&path=enc:uhd`Hqk_s@kiA}nAnfAqpA',
+    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?width=30&linejoin=round&linecap=round&path=enc:uhd`Hqk_s@kiA}nAnfAqpA'
   },
   {
     name: 'linecap-linejoin-bevel-square',
     // Test custom line styling: bevel linejoin and square linecap
-    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?width=30&linejoin=bevel&linecap=square&path=enc:uhd`Hqk_s@kiA}nAnfAqpA',
+    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?width=30&linejoin=bevel&linecap=square&path=enc:uhd`Hqk_s@kiA}nAnfAqpA'
   },
   {
     name: 'static-markers',
     // Test multiple markers with scale and offset options
-    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?marker=8.531,47.38|marker-icon.png|scale:0.8&marker=8.545,47.375|marker-icon-2x.png|offset:5,-10',
+    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?marker=8.531,47.38|marker-icon.png|scale:0.8&marker=8.545,47.375|marker-icon-2x.png|offset:5,-10'
   },
   {
     name: 'static-bbox',
     // Test area-based map rendering using a bounding box (bbox)
-    url: '/styles/test-style/static/8.5,47.35,8.6,47.4/400x300.png',
+    url: '/styles/test-style/static/8.5,47.35,8.6,47.4/400x300.png'
   },
   {
     name: 'static-multiple-paths',
     // Test rendering of multiple, individually styled path parameters
-    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?path=stroke:blue|width:8|fill:none|8.53,47.38|8.54,47.385&path=stroke:red|width:3|fill:yellow|8.53,47.37|8.54,47.375',
+    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?path=stroke:blue|width:8|fill:none|8.53,47.38|8.54,47.385&path=stroke:red|width:3|fill:yellow|8.53,47.37|8.54,47.375'
   },
   {
     name: 'static-path-latlng',
     // Test path rendering when the 'latlng' parameter reverses coordinate order
-    url: '/styles/test-style/static/auto/400x300.png?latlng=true&path=47.38,8.53|47.385,8.54&fill=rgba(0,0,255,0.5)',
+    url: '/styles/test-style/static/auto/400x300.png?latlng=true&path=47.38,8.53|47.385,8.54&fill=rgba(0,0,255,0.5)'
   },
   {
     name: 'static-path-border-stroke',
     // Test path border/halo functionality (line stroke with border halo)
-    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?path=stroke:yellow|width:10|border:black|borderwidth:2|8.53,47.37|8.54,47.38|8.53,47.39',
+    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?path=stroke:yellow|width:10|border:black|borderwidth:2|8.53,47.37|8.54,47.38|8.53,47.39'
   },
   {
     name: 'static-path-border-isolated',
     // Test path border/halo in isolation (only border, no stroke)
-    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?path=border:black|borderwidth:10|8.53,47.37|8.54,47.38|8.53,47.39',
+    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?path=border:black|borderwidth:10|8.53,47.37|8.54,47.38|8.53,47.39'
   },
   {
     name: 'static-border-global',
     // Test border functionality using global query parameters (less common, but valid)
-    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?stroke=yellow&width=10&border=black&borderwidth=2&path=8.53,47.37|8.54,47.38|8.53,47.39',
-  },
+    url: '/styles/test-style/static/8.5375,47.379,12/400x300.png?stroke=yellow&width=10&border=black&borderwidth=2&path=8.53,47.37|8.54,47.38|8.53,47.39'
+  }
 ];
 
 /**
@@ -145,7 +145,7 @@ async function compareImages(actualBuffer, expectedPath) {
 
   if (actual.width !== expected.width || actual.height !== expected.height) {
     throw new Error(
-      `Image dimensions don't match: ${actual.width}x${actual.height} vs ${expected.width}x${expected.height}`,
+      `Image dimensions don't match: ${actual.width}x${actual.height} vs ${expected.width}x${expected.height}`
     );
   }
 
@@ -156,14 +156,14 @@ async function compareImages(actualBuffer, expectedPath) {
     diffBuffer,
     actual.width,
     actual.height,
-    { threshold: THRESHOLD },
+    { threshold: THRESHOLD }
   );
 
   return {
     numDiffPixels,
     diffBuffer,
     width: actual.width,
-    height: actual.height,
+    height: actual.height
   };
 }
 
@@ -182,7 +182,7 @@ if (shouldGenerateFixtures) {
           const fixturePath = path.join(FIXTURES_DIR, `${name}.png`);
           fs.writeFileSync(fixturePath, actualBuffer);
           console.log(
-            `✓ Generated: ${name}.png (${actualBuffer.length} bytes)`,
+            `✓ Generated: ${name}.png (${actualBuffer.length} bytes)`
           );
         } catch (error) {
           console.error(`❌ Failed to generate ${name}:`, error.message);
@@ -191,7 +191,7 @@ if (shouldGenerateFixtures) {
       }
 
       console.log(
-        `\n✓ Successfully generated ${tests.length} fixture images!\n`,
+        `\n✓ Successfully generated ${tests.length} fixture images!\n`
       );
     });
   });
@@ -212,7 +212,7 @@ describe('Static Image Visual Regression Tests', function () {
       const actualBuffer = await fetchImage(url);
       const { numDiffPixels, diffBuffer, width, height } = await compareImages(
         actualBuffer,
-        expectedPath,
+        expectedPath
       );
 
       if (numDiffPixels > MAX_DIFF_PIXELS) {
@@ -223,8 +223,8 @@ describe('Static Image Visual Regression Tests', function () {
           raw: {
             width,
             height,
-            channels: 4,
-          },
+            channels: 4
+          }
         })
           .png()
           .toFile(diffPath);
@@ -234,7 +234,7 @@ describe('Static Image Visual Regression Tests', function () {
 
       expect(numDiffPixels).to.be.at.most(
         MAX_DIFF_PIXELS,
-        `Expected at most ${MAX_DIFF_PIXELS} different pixels, but got ${numDiffPixels}`,
+        `Expected at most ${MAX_DIFF_PIXELS} different pixels, but got ${numDiffPixels}`
       );
     });
   });

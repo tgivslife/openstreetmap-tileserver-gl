@@ -35,7 +35,7 @@ import {
   listFonts,
   readFile,
   setCacheControl,
-  setHostDerivedCacheControl,
+  setHostDerivedCacheControl
 } from './utils.js'
 import { getPMtilesInfo, openPMtiles } from './pmtiles_adapter.js'
 import { renderAttribution, renderOverlay, renderWatermark } from './render.js'
@@ -59,7 +59,7 @@ const staticTypeRegex = new RegExp(
   // Format 3: auto
   `(?<auto>auto)` +
   `)` +
-  `$`,
+  `$`
 )
 
 const PATH_PATTERN =
@@ -80,7 +80,7 @@ const extensionToFormat = {
   '.jpg': 'jpeg',
   '.jpeg': 'jpeg',
   '.png': 'png',
-  '.webp': 'webp',
+  '.webp': 'webp'
 }
 
 /**
@@ -88,7 +88,7 @@ const extensionToFormat = {
  * string is for unknown or unsupported formats.
  */
 const cachedEmptyResponses = {
-  '': Buffer.alloc(0),
+  '': Buffer.alloc(0)
 }
 
 /**
@@ -128,8 +128,8 @@ function createEmptyResponse (format, color, callback) {
       raw: {
         width: 1,
         height: 1,
-        channels,
-      },
+        channels
+      }
     }).toFormat(format).toBuffer((err, buffer, info) => {
       if (err) {
         console.error('Error creating image with Sharp:', err)
@@ -158,7 +158,7 @@ const ALLOW_STATIC_PARAMS = new Set([
   'linecap',
   'linejoin',
   'border',
-  'borderwidth',
+  'borderwidth'
 ])
 
 /**
@@ -188,7 +188,7 @@ export function getSecureMergedParams (query, body) {
       const isPrimitiveArray = Array.isArray(value) && value.every((v) => v === null || typeof v !== 'object')
 
       if (!isPrimitive && !isPrimitiveArray) {
-        throw new Error(`Invalid value type for key "${key}": nested objects are not allowed.`,)
+        throw new Error(`Invalid value type for key "${key}": nested objects are not allowed.`)
       }
 
       const ensureArray = (v) => (Array.isArray(v) ? v : [v])
@@ -474,7 +474,7 @@ function extractMarkersFromQuery (query, options, transformer) {
 
     const marker = {
       location,
-      icon: iconURI,
+      icon: iconURI
     }
 
     // Check if options have been provided
@@ -511,7 +511,7 @@ function calcZForBBox (bbox, w, h, query) {
 
   z -= Math.max(
     Math.log((maxCorner[0] - minCorner[0]) / w_),
-    Math.log((maxCorner[1] - minCorner[1]) / h_),
+    Math.log((maxCorner[1] - minCorner[1]) / h_)
   ) / Math.LN2
 
   z = Math.max(Math.log(Math.max(w, h) / 256) / Math.LN2, Math.min(25, z))
@@ -553,7 +553,7 @@ async function respondImage (
   res,
   overlay = null,
   mode = 'tile',
-  id = null,
+  id = null
 ) {
   if (
     Math.abs(lon) > 180 ||
@@ -617,7 +617,7 @@ async function respondImage (
     }
 
     if (!renderer) {
-      console.error('Renderer is null - likely crashed or failed to initialize',)
+      console.error('Renderer is null - likely crashed or failed to initialize')
       if (!res.headersSent) {
         if (metricsModule) {
           metricsModule.tileErrorsTotal.inc({ type: 'rendered', name: id })
@@ -658,7 +658,7 @@ async function respondImage (
       bearing,
       pitch,
       width,
-      height,
+      height
     }
 
     // HACK(Part 1) 256px tiles are a zoom level lower than maplibre-native default tiles. this hack allows tileserver-gl
@@ -726,21 +726,21 @@ async function respondImage (
               premultiplied: true,
               width: params.width * scale,
               height: params.height * scale,
-              channels: 4,
-            },
+              channels: 4
+            }
           })
 
           if (z > 0 && tileMargin > 0) {
             const y = mercator.px(params.center, z)[1]
             const yoffset = Math.max(
               Math.min(0, y - 128 - tileMargin),
-              y + 128 + tileMargin - Math.pow(2, z + 8),
+              y + 128 + tileMargin - Math.pow(2, z + 8)
             )
             image.extract({
               left: tileMargin * scale,
               top: (tileMargin + yoffset) * scale,
               width: width * scale,
-              height: height * scale,
+              height: height * scale
             })
           }
 
@@ -765,7 +765,7 @@ async function respondImage (
               width,
               height,
               scale,
-              item.staticAttributionText,
+              item.staticAttributionText
             )
             composites.push({ input: canvas.toBuffer() })
           }
@@ -777,7 +777,7 @@ async function respondImage (
           // Legacy formatQuality is deprecated but still works
           const formatQualities = options.formatQuality || {}
           if (Object.keys(formatQualities).length !== 0) {
-            console.log('WARNING: The formatQuality option is deprecated and has been replaced with formatOptions. Please see the documentation. The values from formatQuality will be used if a quality setting is not provided via formatOptions.',)
+            console.log('WARNING: The formatQuality option is deprecated and has been replaced with formatOptions. Please see the documentation. The values from formatQuality will be used if a quality setting is not provided via formatOptions.')
           }
           // eslint-disable-next-line security/detect-object-injection -- format is validated above
           const formatQuality = formatQualities[format]
@@ -793,12 +793,12 @@ async function respondImage (
               quality: formatOptions.quality,
               effort: formatOptions.effort,
               colors: formatOptions.colors,
-              dither: formatOptions.dither,
+              dither: formatOptions.dither
             })
           } else if (format === 'jpeg') {
             image.jpeg({
               quality: formatOptions.quality || formatQuality || 80,
-              progressive: formatOptions.progressive,
+              progressive: formatOptions.progressive
             })
           } else if (format === 'webp') {
             image.webp({ quality: formatOptions.quality || formatQuality || 90 })
@@ -811,7 +811,7 @@ async function respondImage (
                 if (metricsModule) {
                   metricsModule.tileErrorsTotal.inc({
                     type: 'rendered',
-                    name: id,
+                    name: id
                   })
                 }
                 return res.status(500).send('Image processing failed')
@@ -824,17 +824,17 @@ async function respondImage (
                 const renderDurationSec = Number(process.hrtime.bigint() - renderStart) / 1e9
                 metricsModule.tilesServedTotal.inc({
                   type: 'rendered',
-                  name: id,
+                  name: id
                 })
                 const zoomLabel = process.env.TILESERVER_GL_METRICS_ZOOM === 'true' ? String(z) : 'all'
                 metricsModule.tileRenderDuration.observe(
                   { name: id, zoom: zoomLabel },
-                  renderDurationSec,
+                  renderDurationSec
                 )
               }
               res.set({
                 'Last-Modified': item.lastModified,
-                'Content-Type': `image/${format}`,
+                'Content-Type': `image/${format}`
               })
               // Deterministic for a given set of parameters, both for tiles and for static images.
               setCacheControl(res, options, 'tile')
@@ -904,7 +904,7 @@ async function handleTileRequest (
   res,
   next,
   maxScaleFactor,
-  defailtTileSize,
+  defailtTileSize
 ) {
   const {
     id,
@@ -913,7 +913,7 @@ async function handleTileRequest (
     p3: xParam,
     p4: yParam,
     scale: scaleParam,
-    format,
+    format
   } = req.params
   // eslint-disable-next-line security/detect-object-injection -- id is route parameter, validated by Express
   const item = repo[id]
@@ -960,12 +960,12 @@ async function handleTileRequest (
 
   const tileCenter = mercator.ll(
     [((x + 0.5) / (1 << z)) * (256 << z), ((y + 0.5) / (1 << z)) * (256 << z)],
-    z,
+    z
   )
 
   return await respondImage(
     options, item, z, tileCenter[0], tileCenter[1], 0, 0, parsedTileSize, parsedTileSize, scale, format, res, null,
-    'tile', id,
+    'tile', id
   )
 }
 
@@ -991,7 +991,7 @@ async function handleStaticRequest (
   req,
   res,
   next,
-  maxScaleFactor,
+  maxScaleFactor
 ) {
   const {
     id,
@@ -999,7 +999,7 @@ async function handleStaticRequest (
     p3: staticType,
     p4: widthAndHeight,
     scale: scaleParam,
-    format,
+    format
   } = req.params
   // eslint-disable-next-line security/detect-object-injection -- id is route parameter, validated by Express
   const item = repo[id]
@@ -1071,11 +1071,11 @@ async function handleStaticRequest (
     const paths = extractPathsFromQuery(req.query, transformer)
     const markers = extractMarkersFromQuery(req.query, options, transformer)
     const overlay = await renderOverlay(
-      z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query,
+      z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query
     )
 
     return await respondImage(
-      options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static', id,
+      options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static', id
     )
   } else if (staticTypeMatch.groups.minx) {
     // Area Based Static Image
@@ -1112,11 +1112,11 @@ async function handleStaticRequest (
     const paths = extractPathsFromQuery(req.query, transformer)
     const markers = extractMarkersFromQuery(req.query, options, transformer)
     const overlay = await renderOverlay(
-      z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query,
+      z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query
     )
 
     return await respondImage(
-      options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static', id,
+      options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static', id
     )
   } else if (staticTypeMatch.groups.auto) {
     // Area Static Image
@@ -1153,7 +1153,7 @@ async function handleStaticRequest (
     const bbox_ = mercator.convert(bbox, '900913')
     const center = mercator.inverse([
       (bbox_[0] + bbox_[2]) / 2,
-      (bbox_[1] + bbox_[3]) / 2,
+      (bbox_[1] + bbox_[3]) / 2
     ])
 
     // Calculate zoom level
@@ -1166,9 +1166,9 @@ async function handleStaticRequest (
     const x = center[0]
     const y = center[1]
 
-    const overlay = await renderOverlay(z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query,)
+    const overlay = await renderOverlay(z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query)
 
-    return await respondImage(options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static', id,)
+    return await respondImage(options, item, z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, format, res, overlay, 'static', id)
   } else {
     return res.sendStatus(404)
   }
@@ -1190,7 +1190,7 @@ export const serve_rendered = {
     const {
       verbose,
       tileSize: defailtTileSize = 256,
-      allowedHosts,
+      allowedHosts
     } = programOpts
     maxScaleFactor = Math.min(Math.floor(options.maxScaleFactor || 3), 9)
     const app = express().disable('x-powered-by')
@@ -1211,12 +1211,12 @@ export const serve_rendered = {
           try {
             secureParse(buf.toString())
           } catch (err) {
-            const error = new Error(`Invalid JSON or forbidden key detected: ${err.message}`,)
+            const error = new Error(`Invalid JSON or forbidden key detected: ${err.message}`)
             error.status = 400
             throw error
           }
-        },
-      }),
+        }
+      })
     )
 
     app.use((req, res, next) => {
@@ -1227,7 +1227,7 @@ export const serve_rendered = {
             value: merged,
             configurable: true,
             enumerable: true,
-            writable: true,
+            writable: true
           })
         } catch (err) {
           return res.status(400).send(err.message)
@@ -1250,7 +1250,7 @@ export const serve_rendered = {
             String(p3).replace(/\n|\r/g, ''),
             String(p4).replace(/\n|\r/g, ''),
             scale ? '@' + String(scale).replace(/\n|\r/g, '') : '',
-            String(format).replace(/\n|\r/g, ''),
+            String(format).replace(/\n|\r/g, '')
           )
         }
 
@@ -1262,7 +1262,7 @@ export const serve_rendered = {
               req,
               res,
               next,
-              maxScaleFactor,
+              maxScaleFactor
             )
           }
           return res.sendStatus(404)
@@ -1275,7 +1275,7 @@ export const serve_rendered = {
           res,
           next,
           maxScaleFactor,
-          defailtTileSize,
+          defailtTileSize
         )
       } catch (e) {
         console.log(e)
@@ -1308,7 +1308,7 @@ export const serve_rendered = {
           req.params.tileSize
             ? String(req.params.tileSize).replace(/\n|\r/g, '') + '/'
             : '',
-          String(req.params.id).replace(/\n|\r/g, ''),
+          String(req.params.id).replace(/\n|\r/g, '')
         )
       }
       const info = clone(item.tileJSON)
@@ -1321,11 +1321,11 @@ export const serve_rendered = {
         info.format,
         item.publicUrl,
         undefined,
-        allowedHosts,
+        allowedHosts
       )
       setHostDerivedCacheControl(res, options, 'metadata', {
         publicUrl: item.publicUrl,
-        allowedHosts,
+        allowedHosts
       })
       return res.send(info)
     })
@@ -1352,14 +1352,14 @@ export const serve_rendered = {
     id,
     programOpts,
     style,
-    dataResolver,
+    dataResolver
   ) {
     const map = {
       renderers: [],
       renderersStatic: [],
       sources: {},
       sourceTypes: {},
-      sparseFlags: {},
+      sparseFlags: {}
     }
 
     const { publicUrl, verbose, fetchTimeout } = programOpts
@@ -1404,7 +1404,7 @@ export const serve_rendered = {
               // eslint-disable-next-line security/detect-object-injection -- protocol is 'sprites', validated above
               const dir = options.paths[protocol]
               const file = decodeURIComponent(req.url).substring(
-                protocol.length + 3,
+                protocol.length + 3
               )
               readFile(path.join(dir, file)).then((data) => {
                 callback(null, { data: data })
@@ -1423,7 +1423,7 @@ export const serve_rendered = {
                   options.paths[protocol],
                   fontstack,
                   range,
-                  existingFonts,
+                  existingFonts
                 )
                 callback(null, { data: concatenated })
               } catch (err) {
@@ -1449,7 +1449,7 @@ export const serve_rendered = {
                 sourceType,
                 z,
                 x,
-                y,
+                y
               )
               if (fetchTile == null) {
                 if (verbose >= 2) {
@@ -1466,7 +1466,7 @@ export const serve_rendered = {
                 createEmptyResponse(
                   sourceInfo.format,
                   sourceInfo.color,
-                  callback,
+                  callback
                 )
                 return
               }
@@ -1492,7 +1492,7 @@ export const serve_rendered = {
                     response.data,
                     z,
                     x,
-                    y,
+                    y
                   )
                 }
               }
@@ -1506,7 +1506,7 @@ export const serve_rendered = {
               try {
                 timeoutId = setTimeout(() => controller.abort(), timeoutMs)
                 const response = await fetch(req.url, {
-                  signal: controller.signal,
+                  signal: controller.signal
                 })
                 clearTimeout(timeoutId)
 
@@ -1528,7 +1528,7 @@ export const serve_rendered = {
                       req.url,
                       globalSparse
                         ? 'allowing overzoom'
-                        : 'creating empty tile',
+                        : 'creating empty tile'
                     )
                   }
 
@@ -1552,10 +1552,10 @@ export const serve_rendered = {
                 const parsedResponse = {}
 
                 if (responseHeaders.get('last-modified')) {
-                  parsedResponse.modified = new Date(responseHeaders.get('last-modified'),)
+                  parsedResponse.modified = new Date(responseHeaders.get('last-modified'))
                 }
                 if (responseHeaders.get('expires')) {
-                  parsedResponse.expires = new Date(responseHeaders.get('expires'),)
+                  parsedResponse.expires = new Date(responseHeaders.get('expires'))
                 }
                 if (responseHeaders.get('etag')) {
                   parsedResponse.etag = responseHeaders.get('etag')
@@ -1569,17 +1569,17 @@ export const serve_rendered = {
                   console.error(
                     `DNS RESOLUTION FAILED for ${req.url}. ` +
                     `This domain may be unreachable or misconfigured in your style. ` +
-                    `Consider removing it or fixing the DNS.`,
+                    `Consider removing it or fixing the DNS.`
                   )
                 }
 
                 // Log timeout
                 if (error.name === 'AbortError') {
-                  console.error(`FETCH TIMEOUT for ${req.url}. The request took longer than ${timeoutMs} ms to complete.`,)
+                  console.error(`FETCH TIMEOUT for ${req.url}. The request took longer than ${timeoutMs} ms to complete.`)
                 }
 
                 // Log all other errors
-                console.error(`Error fetching remote URL ${req.url}:`, error.message || error,)
+                console.error(`Error fetching remote URL ${req.url}:`, error.message || error)
 
                 if (globalSparse) {
                   // sparse=true -> allow overzoom
@@ -1600,7 +1600,7 @@ export const serve_rendered = {
               if (await existsP(file)) {
                 const inputFileStats = await fsp.stat(file)
                 if (!inputFileStats.isFile() || inputFileStats.size === 0) {
-                  throw Error(`File is not valid: "${req.url}" - resolved to "${file}"`,)
+                  throw Error(`File is not valid: "${req.url}" - resolved to "${file}"`)
                 }
 
                 readFile(file).then((data) => {
@@ -1609,10 +1609,10 @@ export const serve_rendered = {
                   callback(err, null)
                 })
               } else {
-                throw Error(`File does not exist: "${req.url}" - resolved to "${file}"`,)
+                throw Error(`File does not exist: "${req.url}" - resolved to "${file}"`)
               }
             }
-          },
+          }
         })
         renderer.load(styleJSON)
         createCallback(null, renderer)
@@ -1623,7 +1623,7 @@ export const serve_rendered = {
         create: createRenderer.bind(null, ratio),
         destroy: (renderer) => {
           renderer.release()
-        },
+        }
       })
     }
 
@@ -1640,7 +1640,7 @@ export const serve_rendered = {
           spriteItem.url = 'sprites://' +
             spriteItem.url.replace('{style}', path.basename(styleFile, '.json')).replace(
               '{styleJsonFolder}',
-              path.relative(options.paths.sprites, path.dirname(styleJSONPath),),
+              path.relative(options.paths.sprites, path.dirname(styleJSONPath))
             )
         }
       })
@@ -1662,7 +1662,7 @@ export const serve_rendered = {
               `Warning: Layer '${layerIdForWarning}' in style '${id}' has property 'fill-extrusion-height'. ` +
               `3D extrusion may appear distorted or misleading when rendered as a static image due to camera angle limitations. ` +
               `It will be flattened (set to 0) in rendered images. ` +
-              `Note: This property will still work with MapLibre GL JS vector maps.`,
+              `Note: This property will still work with MapLibre GL JS vector maps.`
             )
           }
           layer.paint['fill-extrusion-height'] = 0
@@ -1673,7 +1673,7 @@ export const serve_rendered = {
               `Warning: Layer '${layerIdForWarning}' in style '${id}' has property 'fill-extrusion-base'. ` +
               `3D extrusion may appear distorted or misleading when rendered as a static image due to camera angle limitations. ` +
               `It will be flattened (set to 0) in rendered images. ` +
-              `Note: This property will still work with MapLibre GL JS vector maps.`,
+              `Note: This property will still work with MapLibre GL JS vector maps.`
             )
           }
           layer.paint['fill-extrusion-base'] = 0
@@ -1689,7 +1689,7 @@ export const serve_rendered = {
       maxzoom: 20,
       bounds: [-180, -85.0511, 180, 85.0511],
       format: 'png',
-      type: 'baselayer',
+      type: 'baselayer'
     }
     const attributionOverride = params.tilejson && params.tilejson.attribution
     if (styleJSON.center && styleJSON.zoom) {
@@ -1707,7 +1707,7 @@ export const serve_rendered = {
       lastModified: new Date().toUTCString(),
       watermark: params.watermark || options.watermark,
       staticAttributionText:
-        params.staticAttributionText || options.staticAttributionText,
+        params.staticAttributionText || options.staticAttributionText
     }
     // eslint-disable-next-line security/detect-object-injection -- id is from config file style names
     repo[id] = repoobj
@@ -1766,7 +1766,7 @@ export const serve_rendered = {
             requestPayer,
             s3Region,
             s3UrlFormat,
-            verbose,
+            verbose
           )
           // eslint-disable-next-line security/detect-object-injection -- name is from style sources object keys
           map.sourceTypes[name] = 'pmtiles'
@@ -1785,7 +1785,7 @@ export const serve_rendered = {
           source.type = type
           source.tiles = [
             // meta url which will be detected when requested
-            `pmtiles://${name}/{z}/{x}/{y}.${metadata.format || 'pbf'}`,
+            `pmtiles://${name}/{z}/{x}/{y}.${metadata.format || 'pbf'}`
           ]
           delete source.scheme
 
@@ -1833,7 +1833,7 @@ export const serve_rendered = {
           source.type = type
           source.tiles = [
             // meta url which will be detected when requested
-            `mbtiles://${name}/{z}/{x}/{y}.${info.format || 'pbf'}`,
+            `mbtiles://${name}/{z}/{x}/{y}.${info.format || 'pbf'}`
           ]
           delete source.scheme
 
@@ -1890,8 +1890,8 @@ export const serve_rendered = {
               const total = pool.size ?? 0
               const available = pool.available ?? 0
               metricsModule.renderPoolSize.set({ name: id }, total)
-              metricsModule.renderPoolActive.set({ name: id }, total - available,)
-              metricsModule.renderPoolWaiting.set({ name: id }, pool.pending ?? 0,)
+              metricsModule.renderPoolActive.set({ name: id }, total - available)
+              metricsModule.renderPoolWaiting.set({ name: id }, pool.pending ?? 0)
             } catch (_) {
               /* pool may be mid-teardown */
             }
@@ -1969,13 +1969,13 @@ export const serve_rendered = {
                 await new Promise((resolve) => {
                   source.close((err) => {
                     if (err) {
-                      console.warn(`Failed to close MBTiles source "${sourceId}" while clearing rendered repo entry "${id}":`, err,)
+                      console.warn(`Failed to close MBTiles source "${sourceId}" while clearing rendered repo entry "${id}":`, err)
                     }
                     resolve()
                   })
                 })
               }
-            }),
+            })
           )
           item.map.renderers.forEach((pool) => {
             pool.close()
@@ -1989,7 +1989,7 @@ export const serve_rendered = {
           // eslint-disable-next-line security/detect-object-injection -- id is from Object.keys() iteration
           delete repo[id]
         }
-      }),
+      })
     )
   },
 
@@ -2055,5 +2055,5 @@ export const serve_rendered = {
         }
       })()
     })
-  },
+  }
 }

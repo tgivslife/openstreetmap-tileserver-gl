@@ -74,19 +74,19 @@ async function createTerrainMbtiles(outputPath) {
     db,
     `
     CREATE TABLE IF NOT EXISTS metadata (name TEXT, value TEXT)
-  `,
+  `
   );
   await runDb(
     db,
     `
     CREATE TABLE IF NOT EXISTS tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB)
-  `,
+  `
   );
   await runDb(
     db,
     `
     CREATE UNIQUE INDEX IF NOT EXISTS tile_index ON tiles (zoom_level, tile_column, tile_row)
-  `,
+  `
   );
 
   // Insert metadata
@@ -99,13 +99,13 @@ async function createTerrainMbtiles(outputPath) {
     ['bounds', '-180,-85.051129,180,85.051129'],
     ['center', '0,0,0'],
     ['type', 'baselayer'],
-    ['description', 'Test terrain tiles for elevation API testing'],
+    ['description', 'Test terrain tiles for elevation API testing']
   ];
 
   for (const [name, value] of metadata) {
     await runDb(db, 'INSERT INTO metadata (name, value) VALUES (?, ?)', [
       name,
-      value,
+      value
     ]);
   }
 
@@ -116,7 +116,7 @@ async function createTerrainMbtiles(outputPath) {
   await runDb(
     db,
     'INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)',
-    [0, 0, 0, tile0],
+    [0, 0, 0, tile0]
   );
 
   // Zoom 1: 4 tiles with different elevations
@@ -124,7 +124,7 @@ async function createTerrainMbtiles(outputPath) {
     [0, 0, 200], // top-left
     [1, 0, 500], // top-right
     [0, 1, 1000], // bottom-left
-    [1, 1, 2500], // bottom-right
+    [1, 1, 2500] // bottom-right
   ];
 
   for (const [x, y, elevation] of elevations) {
@@ -134,7 +134,7 @@ async function createTerrainMbtiles(outputPath) {
     await runDb(
       db,
       'INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)',
-      [1, x, tmsY, tile],
+      [1, x, tmsY, tile]
     );
   }
 

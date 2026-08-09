@@ -13,7 +13,7 @@ before(async function () {
   const running = await server({
     configPath: 'config.json',
     port: 8888,
-    publicUrl: '/test/',
+    publicUrl: '/test/'
   });
   global.app = running.app;
   global.server = running.server;

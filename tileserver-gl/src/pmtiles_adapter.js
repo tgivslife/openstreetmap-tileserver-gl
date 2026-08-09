@@ -55,7 +55,7 @@ class S3Source {
     configRequestPayer,
     configRegion,
     s3UrlFormat,
-    verbose = false,
+    verbose = false
   ) {
     const parsed = this.parseS3Url(s3Url, s3UrlFormat)
     this.bucket = parsed.bucket
@@ -74,13 +74,13 @@ class S3Source {
     // Log precedence decisions for debugging
     if (verbose >= 3) {
       console.log(`S3 config precedence for ${s3Url}:`)
-      console.log(`  Profile: ${s3Profile ? 'config' : parsed.profile ? 'url' : 'default'} = ${profile || 'none'}`,)
+      console.log(`  Profile: ${s3Profile ? 'config' : parsed.profile ? 'url' : 'default'} = ${profile || 'none'}`)
       console.log(`  Region: ${configRegion ? 'config' : parsed.region !== (process.env.AWS_REGION || 'us-east-1')
         ? 'url'
-        : 'env/default'} = ${this.region}`,)
+        : 'env/default'} = ${this.region}`)
       console.log(`  RequestPayer: ${configRequestPayer !== undefined ? 'config' : parsed.requestPayer
         ? 'url'
-        : 'default'} = ${this.requestPayer}`,)
+        : 'default'} = ${this.requestPayer}`)
     }
 
     this.s3Client = this.createS3Client(parsed.endpoint, this.region, profile, this.verbose)
@@ -96,7 +96,7 @@ class S3Source {
   parseS3Url (url, s3UrlFormat) {
     // Validate s3UrlFormat if provided
     if (s3UrlFormat && s3UrlFormat !== 'aws' && s3UrlFormat !== 'custom') {
-      console.warn(`Invalid s3UrlFormat: "${s3UrlFormat}". Must be "aws" or "custom". Using auto-detection.`,)
+      console.warn(`Invalid s3UrlFormat: "${s3UrlFormat}". Must be "aws" or "custom". Using auto-detection.`)
       s3UrlFormat = undefined
     }
 
@@ -135,14 +135,14 @@ class S3Source {
       key,
       region,
       profile,
-      requestPayer,
+      requestPayer
     })
 
     // Define patterns based on format
     const patterns = {
       customWithDot: /^s3:\/\/([^/]*\.[^/]+)\/([^/]+)\/(.+)$/, // Auto-detect: requires dot
       customForced: /^s3:\/\/([^/]+)\/([^/]+)\/(.+)$/, // Explicit: no dot required
-      aws: /^s3:\/\/([^/]+)\/(.+)$/,
+      aws: /^s3:\/\/([^/]+)\/(.+)$/
     }
 
     // Match based on s3UrlFormat or auto-detect
@@ -176,7 +176,7 @@ class S3Source {
       `Expected formats:\n` +
       `  AWS S3: s3://bucket-name/path/to/file.pmtiles\n` +
       `  Custom endpoint: s3://endpoint.com/bucket/path/to/file.pmtiles\n` +
-      `Use s3UrlFormat parameter to override auto-detection if needed.`,
+      `Use s3UrlFormat parameter to override auto-detection if needed.`
     )
   }
 
@@ -197,14 +197,14 @@ class S3Source {
     const connectionTimeout = intEnv(
       'TILESERVER_GL_S3_CONNECTION_TIMEOUT_MS',
       5000,
-      0,
+      0
     )
     const requestTimeout = intEnv('TILESERVER_GL_S3_REQUEST_TIMEOUT_MS', 5000, 0)
 
     if (verbose >= 2) {
       console.log(
         `S3 client pool: maxSockets=${maxSockets} keepAlive=${keepAlive} ` +
-        `connectionTimeout=${connectionTimeout}ms requestTimeout=${requestTimeout}ms`,
+        `connectionTimeout=${connectionTimeout}ms requestTimeout=${requestTimeout}ms`
       )
     }
 
@@ -214,9 +214,9 @@ class S3Source {
         connectionTimeout,
         requestTimeout,
         httpAgent: new http.Agent({ keepAlive, maxSockets }),
-        httpsAgent: new https.Agent({ keepAlive, maxSockets }),
+        httpsAgent: new https.Agent({ keepAlive, maxSockets })
       },
-      forcePathStyle: !!endpoint,
+      forcePathStyle: !!endpoint
     }
 
     if (endpoint) {
@@ -260,7 +260,7 @@ class S3Source {
         Bucket: this.bucket,
         Key: this.key,
         Range: `bytes=${offset}-${offset + length - 1}`,
-        IfMatch: etag,
+        IfMatch: etag
       }
 
       if (this.requestPayer) {
@@ -270,7 +270,7 @@ class S3Source {
       const command = new GetObjectCommand(commandParams)
 
       const response = await this.s3Client.send(command, {
-        abortSignal: signal,
+        abortSignal: signal
       })
 
       const arr = await response.Body.transformToByteArray()
@@ -285,7 +285,7 @@ class S3Source {
         data: arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength),
         etag: response.ETag,
         expires: response.Expires?.toISOString(),
-        cacheControl: response.CacheControl,
+        cacheControl: response.CacheControl
       }
     } catch (error) {
       // Handle AWS SDK errors
@@ -295,21 +295,21 @@ class S3Source {
 
       if (error.name === 'NoSuchKey') {
         throw new Error(`PMTiles file not found: ${this.bucket}/${this.key}`, {
-          cause: error,
+          cause: error
         })
       }
 
       if (error.name === 'AccessDenied') {
         throw new Error(
           `Access denied: ${this.bucket}/${this.key}. Check credentials and bucket permissions.`,
-          { cause: error },
+          { cause: error }
         )
       }
 
       if (error.name === 'NoSuchBucket') {
         throw new Error(
           `Bucket not found: ${this.bucket}. Check bucket name and endpoint.`,
-          { cause: error },
+          { cause: error }
         )
       }
 
@@ -350,7 +350,7 @@ class PMTilesFileSource {
     await readFileBytes(this.fd, buffer, offset)
     const ab = buffer.buffer.slice(
       buffer.byteOffset,
-      buffer.byteOffset + buffer.byteLength,
+      buffer.byteOffset + buffer.byteLength
     )
     return { data: ab }
   }
@@ -427,7 +427,7 @@ export function openPMtiles (
   requestPayer,
   s3Region,
   s3UrlFormat,
-  verbose = 0,
+  verbose = 0
 ) {
   // Create a cache key that includes all parameters that affect the source
   const cacheKey = JSON.stringify({
@@ -435,7 +435,7 @@ export function openPMtiles (
     s3Profile,
     requestPayer,
     s3Region,
-    s3UrlFormat,
+    s3UrlFormat
   })
 
   if (pmtilesCache.has(cacheKey)) {
@@ -457,7 +457,7 @@ export function openPMtiles (
       requestPayer,
       s3Region,
       s3UrlFormat,
-      verbose,
+      verbose
     )
     pmtiles = new PMTiles(source)
   } else if (isValidHttpUrl(filePath)) {
@@ -558,7 +558,7 @@ export async function getPMtilesInfo (pmtiles, inputFile, maxRetries = 3) {
           header.minLon,
           header.minLat,
           header.maxLon,
-          header.maxLat,
+          header.maxLat
         ]
       } else {
         metadata['bounds'] = [-180, -85.05112877980659, 180, 85.0511287798066]
@@ -568,13 +568,13 @@ export async function getPMtilesInfo (pmtiles, inputFile, maxRetries = 3) {
         metadata['center'] = [
           header.centerLon,
           header.centerLat,
-          header.centerZoom,
+          header.centerZoom
         ]
       } else {
         metadata['center'] = [
           header.centerLon,
           header.centerLat,
-          parseInt(metadata['maxzoom']) / 2,
+          parseInt(metadata['maxzoom']) / 2
         ]
       }
 
@@ -585,7 +585,7 @@ export async function getPMtilesInfo (pmtiles, inputFile, maxRetries = 3) {
       if (isThrottleError(error) && attempt < maxRetries - 1) {
         const delay = Math.pow(2, attempt) * 1000
         console.warn(
-          `Rate limited fetching metadata, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
+          `Rate limited fetching metadata, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`
         )
         await new Promise((resolve) => setTimeout(resolve, delay))
         continue
@@ -634,7 +634,7 @@ export async function getPMtilesTile (pmtiles, z, x, y, maxRetries = 3) {
     } catch (error) {
       if (isThrottleError(error) && attempt < maxRetries - 1) {
         const delay = Math.pow(2, attempt) * 1000
-        console.warn(`Rate limited for tile ${z}/${x}/${y}, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,)
+        console.warn(`Rate limited for tile ${z}/${x}/${y}, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`)
         await new Promise((resolve) => setTimeout(resolve, delay))
         continue
       }
@@ -648,7 +648,7 @@ export async function getPMtilesTile (pmtiles, z, x, y, maxRetries = 3) {
     }
   }
 
-  console.error(`Failed to fetch tile ${z}/${x}/${y} after ${maxRetries} attempts`,)
+  console.error(`Failed to fetch tile ${z}/${x}/${y} after ${maxRetries} attempts`)
   return { data: undefined, header: tileType?.header }
 }
 

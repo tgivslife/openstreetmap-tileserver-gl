@@ -7,7 +7,7 @@ var testTile = function (
   format,
   status,
   scale,
-  type,
+  type
 ) {
   if (scale) y += '@' + scale + 'x';
   var path =

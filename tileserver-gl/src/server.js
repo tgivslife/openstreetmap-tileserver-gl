@@ -25,7 +25,7 @@ import {
   isValidHttpUrl,
   isValidRemoteUrl,
   setCacheControl,
-  setHostDerivedCacheControl,
+  setHostDerivedCacheControl
 } from './utils.js'
 
 import { fileURLToPath } from 'url'
@@ -33,7 +33,7 @@ import { fileURLToPath } from 'url'
 const mercator = new SphericalMercator()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const packageJson = JSON.parse(
-  fs.readFileSync(__dirname + '/../package.json', 'utf8'),
+  fs.readFileSync(__dirname + '/../package.json', 'utf8')
 )
 const isLight = packageJson.name.slice(-6) === '-light'
 
@@ -55,7 +55,7 @@ async function start (opts) {
     styles: {},
     rendered: {},
     data: {},
-    fonts: {},
+    fonts: {}
   }
   let cleanup = async () => {}
 
@@ -78,12 +78,12 @@ async function start (opts) {
       res.on('finish', () => {
         const route = req.route?.path ?? '<unknown>'
         const durationSec = Number(process.hrtime.bigint() - start) / 1e9
-        metricsModule.httpRequestsTotal.inc({ method: req.method, route, status_code: String(res.statusCode), })
+        metricsModule.httpRequestsTotal.inc({ method: req.method, route, status_code: String(res.statusCode) })
         metricsModule.httpRequestDuration.observe({
           method: req.method,
           route,
           status_code: String(res.statusCode)
-        }, durationSec,)
+        }, durationSec)
       })
       next()
     })
@@ -97,8 +97,8 @@ async function start (opts) {
     morgan.token('url', (req) =>
       (req.originalUrl || req.url).replace(
         /([?&]key=)[^&]*/gi,
-        '$1[REDACTED]',
-      ),
+        '$1[REDACTED]'
+      )
     )
     const defaultLogFormat = process.env.NODE_ENV === 'production' ? 'tiny' : 'dev'
     const logFormat = opts.logFormat || defaultLogFormat
@@ -109,15 +109,15 @@ async function start (opts) {
       morgan(logFormat, {
         stream: accessLogStream || process.stdout,
         skip: (req, res) =>
-          opts.silent && (res.statusCode === 200 || res.statusCode === 304),
-      }),
+          opts.silent && (res.statusCode === 200 || res.statusCode === 304)
+      })
     )
   }
 
   // Optional API-key / TTL-token gate, enabled by env; off (no middleware) when unset. See docs/2.USAGE.md for the env vars and token format.
   const apiKeys = (process.env.TILESERVER_GL_API_KEYS || '').split(',').map((k) => k.trim()).filter(Boolean)
   const tokenSecret = process.env.TILESERVER_GL_TOKEN_SECRET || ''
-  const parsedMaxTtl = parseInt(process.env.TILESERVER_GL_TOKEN_MAX_TTL || '', 10,)
+  const parsedMaxTtl = parseInt(process.env.TILESERVER_GL_TOKEN_MAX_TTL || '', 10)
   const tokenMaxTtl = Number.isFinite(parsedMaxTtl) && parsedMaxTtl > 0 ? parsedMaxTtl : 604800 // 7d
   const allowedOrigins = (process.env.TILESERVER_GL_ALLOWED_ORIGINS || '').split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean)
 
@@ -125,7 +125,7 @@ async function start (opts) {
   // An Origin allowlist reflects only those origins instead of the default *.
   if (opts.cors) {
     app.use(
-      cors(allowedOrigins.length ? { origin: allowedOrigins } : undefined),
+      cors(allowedOrigins.length ? { origin: allowedOrigins } : undefined)
     )
   }
 
@@ -247,14 +247,14 @@ async function start (opts) {
             return v
           }
           return fallback !== undefined ? fallback : match
-        },
+        }
       )
     }
     if (Array.isArray(value)) {
       return value.map(interpolateEnv)
     }
     if (value && typeof value === 'object') {
-      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, interpolateEnv(v)]),)
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, interpolateEnv(v)]))
     }
     return value
   }
@@ -279,7 +279,7 @@ async function start (opts) {
   const options = config.options || {}
   const paths = options.paths || {}
   options.paths = paths
-  paths.root = path.resolve(configPath ? path.dirname(configPath) : process.cwd(), paths.root || '',)
+  paths.root = path.resolve(configPath ? path.dirname(configPath) : process.cwd(), paths.root || '')
   paths.styles = path.resolve(paths.root, paths.styles || '')
   paths.fonts = path.resolve(paths.root, paths.fonts || '')
   paths.sprites = path.resolve(paths.root, paths.sprites || '')
@@ -294,7 +294,7 @@ async function start (opts) {
     // eslint-disable-next-line security/detect-object-injection -- paths[type] constructed from validated config paths
     if (!fs.existsSync(paths[type])) {
       // eslint-disable-next-line security/detect-object-injection -- type is from Object.keys of paths config
-      console.error(`The specified path for "${type}" does not exist (${paths[type]}).`,)
+      console.error(`The specified path for "${type}" does not exist (${paths[type]}).`)
       process.exit(1)
     }
   }
@@ -309,7 +309,7 @@ async function start (opts) {
     // Fetch all entries of the directory and attach type information
 
     const dirEntries = await fs.promises.readdir(directory, {
-      withFileTypes: true,
+      withFileTypes: true
     })
 
     // Iterate through entries and return the relative file-path to the icon directory if it is not a directory
@@ -318,7 +318,7 @@ async function start (opts) {
       dirEntries.map((dirEntry) => {
         const entryPath = path.resolve(directory, dirEntry.name)
         return dirEntry.isDirectory() ? getFiles(entryPath) : entryPath.replace(paths.icons + path.sep, '')
-      }),
+      })
     )
 
     // Flatten the list of files to a single array
@@ -329,7 +329,7 @@ async function start (opts) {
   startupPromises.push(
     getFiles(paths.icons).then((files) => {
       paths.availableIcons = files
-    }),
+    })
   )
 
   if (options.dataDecorator) {
@@ -351,7 +351,7 @@ async function start (opts) {
   const staticOptions = staticCacheControl
     ? {
       setHeaders: (staticRes) =>
-        staticRes.set('Cache-Control', staticCacheControl),
+        staticRes.set('Cache-Control', staticCacheControl)
     }
     : {}
 
@@ -360,7 +360,7 @@ async function start (opts) {
   app.use('/styles/', serve_style.init(options, serving.styles, opts))
   if (!isLight) {
     startupPromises.push(
-      serve_rendered.init(options, serving.rendered, opts).then((sub) => {app.use('/styles/', sub)}),
+      serve_rendered.init(options, serving.rendered, opts).then((sub) => {app.use('/styles/', sub)})
     )
   }
 
@@ -460,7 +460,7 @@ async function start (opts) {
             return dataItemId
           } else {
             if (!allowMoreData) {
-              console.log(`ERROR: style "${item.style}" using unknown file "${styleSourceId}"! Skipping...`,)
+              console.log(`ERROR: style "${item.style}" using unknown file "${styleSourceId}"! Skipping...`)
               return undefined
             } else {
               let id =
@@ -491,7 +491,7 @@ async function start (opts) {
               }
               // Add the new data source to the data array.
               // eslint-disable-next-line security/detect-object-injection -- id is constructed above to be unique
-              data[id] = { [protocol]: styleSourceId, }
+              data[id] = { [protocol]: styleSourceId }
 
               return id
             }
@@ -502,7 +502,7 @@ async function start (opts) {
             // eslint-disable-next-line security/detect-object-injection -- font is font name from style
             serving.fonts[font] = true
           }
-        },
+        }
       )
     }
     if (success && item.serve_rendered !== false) {
@@ -525,8 +525,8 @@ async function start (opts) {
 
             // Debug logging to see what we're trying to match
             if (opts.verbose >= 3) {
-              console.log(`[dataResolver] Looking for styleSourceId: ${styleSourceId}`,)
-              console.log(`[dataResolver] Available data keys: ${Object.keys(data).join(', ')}`,)
+              console.log(`[dataResolver] Looking for styleSourceId: ${styleSourceId}`)
+              console.log(`[dataResolver] Available data keys: ${Object.keys(data).join(', ')}`)
             }
 
             for (const id of Object.keys(data)) {
@@ -547,7 +547,7 @@ async function start (opts) {
               if (currentFileType && currentInputFileValue) {
                 // Debug logging
                 if (opts.verbose >= 3) {
-                  console.log(`[dataResolver] Checking id="${id}", file="${currentInputFileValue}"`,)
+                  console.log(`[dataResolver] Checking id="${id}", file="${currentInputFileValue}"`)
                 }
 
                 // Check if this source matches the styleSourceId
@@ -558,7 +558,7 @@ async function start (opts) {
 
                 if (matchById || matchByFile || matchByBasename) {
                   if (opts.verbose >= 2) {
-                    console.log(`[dataResolver] Match found for styleSourceId: ${styleSourceId}. (byId=${matchById}, byFile=${matchByFile}, byBasename=${matchByBasename})`,)
+                    console.log(`[dataResolver] Match found for styleSourceId: ${styleSourceId}. (byId=${matchById}, byFile=${matchByFile}, byBasename=${matchByBasename})`)
                   }
 
                   resolvedFileType = currentFileType
@@ -594,12 +594,12 @@ async function start (opts) {
 
             // If no match was found
             if (!resolvedInputFile || !resolvedFileType) {
-              console.warn(`Data source not found for styleSourceId: ${styleSourceId}`,)
+              console.warn(`Data source not found for styleSourceId: ${styleSourceId}`)
               console.warn(`Available data sources: ${Object.keys(data).map((id) => {
                   // eslint-disable-next-line security/detect-object-injection
                   const src = data[id]
                   return `${id} -> ${src.pmtiles || src.mbtiles || 'unknown'}`
-                }).join(', ')}`,
+                }).join(', ')}`
               )
               return {
                 inputFile: undefined,
@@ -608,7 +608,7 @@ async function start (opts) {
                 requestPayer: false,
                 s3Region: undefined,
                 s3UrlFormat: undefined,
-                sparse: true,
+                sparse: true
               }
             }
 
@@ -624,10 +624,10 @@ async function start (opts) {
                 resolvedInputFile = path.resolve(
                   // eslint-disable-next-line security/detect-object-injection -- resolvedFileType is either 'pmtiles' or 'mbtiles'
                   options.paths[resolvedFileType],
-                  resolvedInputFile,
+                  resolvedInputFile
                 )
               } else {
-                console.warn(`Path configuration missing for fileType: ${resolvedFileType}. Using relative path for: ${resolvedInputFile}`,)
+                console.warn(`Path configuration missing for fileType: ${resolvedFileType}. Using relative path for: ${resolvedInputFile}`)
               }
             }
 
@@ -638,9 +638,9 @@ async function start (opts) {
               requestPayer: resolvedRequestPayer,
               s3Region: resolvedS3Region,
               s3UrlFormat: resolvedS3UrlFormat,
-              sparse: resolvedSparse,
+              sparse: resolvedSparse
             }
-          },
+          }
         )
       } else {
         item.serve_rendered = false
@@ -675,17 +675,17 @@ async function start (opts) {
         const item = data[id]
 
         if (!item.pmtiles && !item.mbtiles) {
-          console.log(`Missing "pmtiles" or "mbtiles" property for ${id} data source`,)
+          console.log(`Missing "pmtiles" or "mbtiles" property for ${id} data source`)
           continue
         }
 
-        dataLoadPromises.push(serve_data.add(options, serving.data, item, id, opts),)
+        dataLoadPromises.push(serve_data.add(options, serving.data, item, id, opts))
       }
       return Promise.all(dataLoadPromises)
-    }),
+    })
   )
 
-  startupPromises.push(serve_font(options, serving.fonts, opts).then((sub) => {app.use('/', sub)}),)
+  startupPromises.push(serve_font(options, serving.fonts, opts).then((sub) => {app.use('/', sub)}))
   if (options.serveAllStyles) {
     fs.readdir(options.paths.styles, { withFileTypes: true }, (err, files) => {
       if (err) {
@@ -695,7 +695,7 @@ async function start (opts) {
         if (file.isFile() && path.extname(file.name).toLowerCase() == '.json') {
           const id = path.basename(file.name, '.json')
           const item = {
-            style: file.name,
+            style: file.name
           }
           // Fire-and-forget: addStyle now awaits serve_rendered.add internally, so a rendered-init failure here would otherwise be an unhandled rejection.
           // For dynamically discovered styles we log and continue rather than exit.
@@ -706,7 +706,7 @@ async function start (opts) {
       }
     })
 
-    const watcher = chokidar.watch(path.join(options.paths.styles, '*.json'), {},)
+    const watcher = chokidar.watch(path.join(options.paths.styles, '*.json'), {})
     cleanup = async () => {
       await watcher.close()
     }
@@ -721,7 +721,7 @@ async function start (opts) {
         }
 
         if (eventType == 'add' || eventType == 'change') {
-          const item = { style: filename, }
+          const item = { style: filename }
           // Fire-and-forget (see note above): swallow rejection with a log so a failed hot-reload of one style cannot bring the whole server down.
           addStyle(id, item, false, false).catch((err) => {
             console.error(`Error adding style "${id}":`, err && err.stack ? err.stack : err)
@@ -751,13 +751,13 @@ async function start (opts) {
         url: `${getPublicUrl(
           opts.publicUrl,
           req,
-          opts.allowedHosts,
-        )}styles/${id}/style.json${query}`,
+          opts.allowedHosts
+        )}styles/${id}/style.json${query}`
       })
     }
     setHostDerivedCacheControl(res, options, 'metadata', {
       publicUrl: opts.publicUrl,
-      allowedHosts: opts.allowedHosts,
+      allowedHosts: opts.allowedHosts
     })
     res.send(result)
   })
@@ -789,9 +789,9 @@ async function start (opts) {
         info.format,
         opts.publicUrl,
         {
-          pbf: options.pbfAlias,
+          pbf: options.pbfAlias
         },
-        opts.allowedHosts,
+        opts.allowedHosts
       )
       arr.push(info)
     }
@@ -810,7 +810,7 @@ async function start (opts) {
     const tileSize = allowedTileSizes(req.params['tileSize'])
     setHostDerivedCacheControl(res, options, 'metadata', {
       publicUrl: opts.publicUrl,
-      allowedHosts: opts.allowedHosts,
+      allowedHosts: opts.allowedHosts
     })
     res.send(addTileJSONs([], req, 'rendered', parseInt(tileSize, 10)))
   })
@@ -824,7 +824,7 @@ async function start (opts) {
   app.get('/data.json', (req, res) => {
     setHostDerivedCacheControl(res, options, 'metadata', {
       publicUrl: opts.publicUrl,
-      allowedHosts: opts.allowedHosts,
+      allowedHosts: opts.allowedHosts
     })
     res.send(addTileJSONs([], req, 'data', undefined))
   })
@@ -841,21 +841,21 @@ async function start (opts) {
     const tileSize = allowedTileSizes(req.params['tileSize'])
     setHostDerivedCacheControl(res, options, 'metadata', {
       publicUrl: opts.publicUrl,
-      allowedHosts: opts.allowedHosts,
+      allowedHosts: opts.allowedHosts
     })
     res.send(
       addTileJSONs(
         addTileJSONs([], req, 'rendered', parseInt(tileSize, 10)),
         req,
         'data',
-        undefined,
-      ),
+        undefined
+      )
     )
   })
 
   // ------------------------------------
   // serve web presentations
-  app.use('/', express.static(path.join(__dirname, '../public/resources'), staticOptions),)
+  app.use('/', express.static(path.join(__dirname, '../public/resources'), staticOptions))
 
   const templates = path.join(__dirname, '../public/templates')
 
@@ -927,7 +927,7 @@ async function start (opts) {
         // eslint-disable-next-line security/detect-object-injection -- id is from Object.keys of serving.styles
         serving_data: serving.styles[id],
         // eslint-disable-next-line security/detect-object-injection -- id is from Object.keys of serving.styles
-        serving_rendered: serving.rendered[id],
+        serving_rendered: serving.rendered[id]
       }
 
       if (style.serving_rendered) {
@@ -949,7 +949,7 @@ async function start (opts) {
           style.serving_rendered.tileJSON.format,
           opts.publicUrl,
           undefined,
-          opts.allowedHosts,
+          opts.allowedHosts
         )[0]
       }
 
@@ -978,9 +978,9 @@ async function start (opts) {
         tileJSON.format,
         opts.publicUrl,
         {
-          pbf: options.pbfAlias,
+          pbf: options.pbfAlias
         },
-        opts.allowedHosts,
+        opts.allowedHosts
       )[0]
 
       data.is_vector = tileJSON.format === 'pbf'
@@ -995,7 +995,7 @@ async function start (opts) {
               undefined,
               opts.publicUrl,
               undefined,
-              opts.allowedHosts,
+              opts.allowedHosts
             )[0]
           }
           data.is_terrain = true
@@ -1011,7 +1011,7 @@ async function start (opts) {
     }
     return {
       styles: Object.keys(styles).length ? styles : null,
-      data: Object.keys(datas).length ? datas : null,
+      data: Object.keys(datas).length ? datas : null
     }
   })
 
@@ -1036,7 +1036,7 @@ async function start (opts) {
       // eslint-disable-next-line security/detect-object-injection -- id is route parameter from URL
       serving_data: serving.styles[id],
       // eslint-disable-next-line security/detect-object-injection -- id is route parameter from URL
-      serving_rendered: serving.rendered[id],
+      serving_rendered: serving.rendered[id]
     }
   })
 
@@ -1068,7 +1068,7 @@ async function start (opts) {
       id,
       // eslint-disable-next-line security/detect-object-injection -- id is route parameter from URL
       name: (serving.styles[id] || serving.rendered[id]).name,
-      baseUrl: getPublicUrl(opts.publicUrl, req, opts.allowedHosts),
+      baseUrl: getPublicUrl(opts.publicUrl, req, opts.allowedHosts)
     }
   })
 
@@ -1099,7 +1099,7 @@ async function start (opts) {
       is_terrain: is_terrain,
       is_terrainrgb: data.tileJSON.encoding === 'mapbox',
       terrain_encoding: data.tileJSON.encoding,
-      is_light: isLight,
+      is_light: isLight
     }
   })
 
@@ -1141,7 +1141,7 @@ async function start (opts) {
         address = `[${address}]` // literal IPv6 address
       }
       console.log(`Listening at http://${address}:${addressInfo.port}/`)
-    },
+    }
   )
 
   // Handle server errors
@@ -1176,12 +1176,12 @@ async function start (opts) {
       await new Promise((resolve) => {
         metricsServer = metricsApp.listen(opts.metricsPort, '127.0.0.1')
         metricsServer.once('error', (err) => {
-          console.warn(`[metrics] Failed to start metrics server: ${err.message}`,)
+          console.warn(`[metrics] Failed to start metrics server: ${err.message}`)
           resolve() // don't crash — metrics are non-critical
         })
         metricsServer.once('listening', resolve)
       })
-      console.log(`Prometheus metrics available at http://localhost:${opts.metricsPort}/metrics`,)
+      console.log(`Prometheus metrics available at http://localhost:${opts.metricsPort}/metrics`)
     } catch (err) {
       console.warn(`[metrics] Failed to initialize metrics: ${err.message}`)
     }
@@ -1194,7 +1194,7 @@ async function start (opts) {
     serving,
     cleanup,
     metricsServer,
-    accessLogStream,
+    accessLogStream
   }
 }
 

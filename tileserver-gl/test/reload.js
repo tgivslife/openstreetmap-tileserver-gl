@@ -39,16 +39,16 @@ describe('SIGHUP reload', function () {
     const previousListeners = [
       {
         eventName: 'SIGHUP',
-        listenerCount: process.listeners('SIGHUP').length,
+        listenerCount: process.listeners('SIGHUP').length
       },
       {
         eventName: 'SIGINT',
-        listenerCount: process.listeners('SIGINT').length,
+        listenerCount: process.listeners('SIGINT').length
       },
       {
         eventName: 'SIGTERM',
-        listenerCount: process.listeners('SIGTERM').length,
-      },
+        listenerCount: process.listeners('SIGTERM').length
+      }
     ];
     let running;
 
@@ -56,13 +56,13 @@ describe('SIGHUP reload', function () {
       running = await server({
         configPath: path.join(__dirname, 'fixtures/reload-config.json'),
         port: 0,
-        publicUrl: '/test/',
+        publicUrl: '/test/'
       });
       await running.startupPromise;
 
       const reloadListeners = getAddedListeners(
         'SIGHUP',
-        previousListeners[0].listenerCount,
+        previousListeners[0].listenerCount
       );
       expect(reloadListeners).to.have.lengthOf(1);
 

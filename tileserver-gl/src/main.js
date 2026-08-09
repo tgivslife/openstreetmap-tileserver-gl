@@ -17,7 +17,7 @@ import { openMbTilesWrapper } from './mbtiles_wrapper.js'
 
 const envSize = parseInt(process.env.UV_THREADPOOL_SIZE, 10)
 process.env.UV_THREADPOOL_SIZE = Math.ceil(
-  Math.max(4, isNaN(envSize) ? os.cpus().length * 1.5 : envSize),
+  Math.max(4, isNaN(envSize) ? os.cpus().length * 1.5 : envSize)
 )
 
 // ============================================================================
@@ -45,7 +45,7 @@ process.on('uncaughtException', (error) => {
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const packageJson = JSON.parse(
-  fs.readFileSync(__dirname + '/../package.json', 'utf8'),
+  fs.readFileSync(__dirname + '/../package.json', 'utf8')
 )
 
 const args = process.argv
@@ -58,22 +58,22 @@ program.description('tileserver-gl startup options')
   .option(
     '--file <file>',
     'MBTiles or PMTiles file (local path, http(s)://, or s3:// URL)\n' +
-    '\t                  ignored if the configuration file is also specified',)
+    '\t                  ignored if the configuration file is also specified')
   .option(
     '--mbtiles <file>',
     '(DEPRECIATED) MBTiles file\n' +
     '\t                  ignored if file is also specified' +
-    '\t                  ignored if the configuration file is also specified',)
+    '\t                  ignored if the configuration file is also specified')
   .option(
     '-c, --config <file>',
     'Configuration file [config.json]',
-    'config.json',)
+    'config.json')
   .option('-b, --bind <address>', 'Bind address')
   .option('-p, --port <port>', 'Port [8080]', 8080, parseInt)
   .option('-C|--no-cors', 'Disable Cross-origin resource sharing headers')
   .option(
     '-u|--public_url <url>',
-    'Enable exposing the server on subpaths, not necessarily the root of the domain (env: PUBLIC_URL)',)
+    'Enable exposing the server on subpaths, not necessarily the root of the domain (env: PUBLIC_URL)')
   .option(
     '-V, --verbose [level]',
     'More verbose output (level 1-3)\n' +
@@ -87,25 +87,25 @@ program.description('tileserver-gl startup options')
       const level = parseInt(value, 10)
       // Validate level is between 1-3
       return isNaN(level) ? 1 : Math.min(Math.max(level, 1), 3)
-    },)
+    })
   .option(
     '--fetch-timeout <ms>',
     'External fetch timeout in milliseconds for renderer HTTP requests (default 15000)',
     (value) => {
       const v = parseInt(value, 10)
       return isNaN(v) ? 15000 : v
-    },)
+    })
   .option('-s, --silent', 'Less verbose output')
   .option('-l|--log_file <file>', 'output log file (defaults to standard out)')
   .option(
     '-f|--log_format <format>',
-    'define the log format:  https://github.com/expressjs/morgan#morganformat-options',)
+    'define the log format:  https://github.com/expressjs/morgan#morganformat-options')
   .option(
     '--ignore-missing-files',
-    'Continue startup even if configured mbtiles/pmtiles files are missing',)
+    'Continue startup even if configured mbtiles/pmtiles files are missing')
   .option(
     '--metrics',
-    'Enable Prometheus metrics endpoint (env: TILESERVER_GL_METRICS)',)
+    'Enable Prometheus metrics endpoint (env: TILESERVER_GL_METRICS)')
   .version(packageJson.version, '-v, --version')
 
 program.parse(process.argv)
@@ -133,9 +133,9 @@ const startServer = (configPath, config) => {
   // Log warning if insecure defaults
   if ((allowedHosts === '*' || allowedHosts === '' || typeof allowedHosts === 'undefined')
     && !publicUrl) {
-    console.warn('[SECURITY WARNING] Host header poisoning mitigation is NOT enabled.',)
-    console.warn('  Response URLs may be built from untrusted Host/X-Forwarded-* headers.',)
-    console.warn('  For production, set --public_url / PUBLIC_URL, allowedHosts in config, or TILESERVER_GL_ALLOWED_HOSTS env.',)
+    console.warn('[SECURITY WARNING] Host header poisoning mitigation is NOT enabled.')
+    console.warn('  Response URLs may be built from untrusted Host/X-Forwarded-* headers.')
+    console.warn('  For production, set --public_url / PUBLIC_URL, allowedHosts in config, or TILESERVER_GL_ALLOWED_HOSTS env.')
   }
   return server({
     configPath,
@@ -155,14 +155,14 @@ const startServer = (configPath, config) => {
     metricsPort: (() => {
       const port = parseInt(process.env.METRICS_PORT, 10)
       return !isNaN(port) && port > 0 ? port : 9090
-    })(),
+    })()
   })
 }
 
 const startWithInputFile = async (inputFile) => {
   console.log(`[INFO] Automatically creating config file for ${inputFile}`)
   console.log(`[INFO] Only a basic preview style will be used.`)
-  console.log(`[INFO] See documentation to learn how to create config.json file.`,)
+  console.log(`[INFO] See documentation to learn how to create config.json file.`)
 
   // Determine file type from prefix or extension
   let fileType = null
@@ -183,7 +183,7 @@ const startWithInputFile = async (inputFile) => {
 
   if (!fileType) {
     console.log(`ERROR: Unable to determine file type for "${inputFile}".`)
-    console.log(`File must end with .pmtiles or .mbtiles, or use pmtiles:// or mbtiles:// prefix.`,)
+    console.log(`File must end with .pmtiles or .mbtiles, or use pmtiles:// or mbtiles:// prefix.`)
     process.exit(1)
   }
 
@@ -204,7 +204,7 @@ const startWithInputFile = async (inputFile) => {
   }
   console.log(`[INFO] Loading data source from: ${inputFile}`)
 
-  const styleDir = path.resolve(__dirname, '../node_modules/tileserver-gl-styles/',)
+  const styleDir = path.resolve(__dirname, '../node_modules/tileserver-gl-styles/')
 
   const config = {
     options: {
@@ -213,11 +213,11 @@ const startWithInputFile = async (inputFile) => {
         fonts: 'fonts',
         styles: 'styles',
         mbtiles: inputFilePath,
-        pmtiles: inputFilePath,
-      },
+        pmtiles: inputFilePath
+      }
     },
     styles: {},
-    data: {},
+    data: {}
   }
 
   if (fileType === 'pmtiles') {
@@ -227,7 +227,7 @@ const startWithInputFile = async (inputFile) => {
       undefined, // requestPayer
       undefined,    // s3Region
       undefined,  // s3UrlFormat
-      opts.verbose,
+      opts.verbose
     )
     const metadata = await getPMtilesInfo(fileOpenInfo, inputFile)
 
@@ -237,11 +237,11 @@ const startWithInputFile = async (inputFile) => {
       // Use inputFile directly for remote URLs (HTTP or S3)
       if (isValidRemoteUrl(inputFile)) {
         config['data'][`v3`] = {
-          pmtiles: inputFile,
+          pmtiles: inputFile
         }
       } else {
         config['data'][`v3`] = {
-          pmtiles: path.basename(inputFile),
+          pmtiles: path.basename(inputFile)
         }
       }
 
@@ -254,21 +254,21 @@ const startWithInputFile = async (inputFile) => {
           config['styles'][styleName] = {
             style: styleFileRel,
             tilejson: {
-              bounds: metadata.bounds,
-            },
+              bounds: metadata.bounds
+            }
           }
         }
       }
     } else {
-      console.log(`WARN: PMTiles not in "openmaptiles" format. Serving raw data only...`,)
+      console.log(`WARN: PMTiles not in "openmaptiles" format. Serving raw data only...`)
       // Use inputFile directly for remote URLs (HTTP or S3)
       if (isValidRemoteUrl(inputFile)) {
         config['data'][(metadata.id || 'pmtiles').replace(/[?/:]/g, '_')] = {
-          pmtiles: inputFile,
+          pmtiles: inputFile
         }
       } else {
         config['data'][(metadata.id || 'pmtiles').replace(/[?/:]/g, '_')] = {
-          pmtiles: path.basename(inputFile),
+          pmtiles: path.basename(inputFile)
         }
       }
     }
@@ -283,7 +283,7 @@ const startWithInputFile = async (inputFile) => {
   } else if (fileType === 'mbtiles') {
     // MBTiles handling - reject remote URLs
     if (isValidRemoteUrl(inputFile)) {
-      console.log(`ERROR: MBTiles does not support remote files. "${inputFile}" is not a valid data file.`,)
+      console.log(`ERROR: MBTiles does not support remote files. "${inputFile}" is not a valid data file.`)
       process.exit(1)
     }
     let info
@@ -301,7 +301,7 @@ const startWithInputFile = async (inputFile) => {
     if (info.format === 'pbf'
       && typeof info.name === 'string'
       && info.name.toLowerCase().indexOf('openmaptiles') > -1) {
-      config['data'][`v3`] = { mbtiles: path.basename(inputFile), }
+      config['data'][`v3`] = { mbtiles: path.basename(inputFile) }
 
       const styles = await fsp.readdir(path.resolve(styleDir, 'styles'))
       for (const styleName of styles) {
@@ -312,15 +312,15 @@ const startWithInputFile = async (inputFile) => {
           config['styles'][styleName] = {
             style: styleFileRel,
             tilejson: {
-              bounds,
-            },
+              bounds
+            }
           }
         }
       }
     } else {
-      console.log(`WARN: MBTiles not in "openmaptiles" format. Serving raw data only...`,)
+      console.log(`WARN: MBTiles not in "openmaptiles" format. Serving raw data only...`)
       config['data'][(info.id || 'mbtiles').replace(/[?/:]/g, '_')] = {
-        mbtiles: path.basename(inputFile),
+        mbtiles: path.basename(inputFile)
       }
     }
 
@@ -390,7 +390,7 @@ fs.stat(path.resolve(opts.config), async (err, stats) => {
       return await startServer(opts.config, null)
     }
   } catch (error) {
-    console.error('Fatal error during startup:', error && error.stack ? error.stack : error,)
+    console.error('Fatal error during startup:', error && error.stack ? error.stack : error)
     process.exit(1)
   }
 })

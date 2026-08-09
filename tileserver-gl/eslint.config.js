@@ -17,8 +17,8 @@ export default [
         lib: ['es2022'],
         ecmaFeatures: {
           jsx: true,
-          tsx: true,
-        },
+          tsx: true
+        }
       },
       globals: {
         ...globals.node, // Add Node.js globals
@@ -28,16 +28,16 @@ export default [
         supertest: 'readonly', // Mark supertest as a global read-only variable
         expect: 'readonly', // Mark expect as a global read-only variable if your assertion library isn't automatically detected
         app: 'readonly', // Mark app as a global read-only variable
-        server: 'readonly', // Mark server as a global read-only variable
-      },
-    },
+        server: 'readonly' // Mark server as a global read-only variable
+      }
+    }
   },
   {
     plugins: {
       '@typescript-eslint': tseslint,
       jsdoc: jsdoc,
-      security: security,
-    },
+      security: security
+    }
   },
   {
     rules: {
@@ -45,15 +45,16 @@ export default [
       ...tseslint.configs['eslint-recommended'].rules,
       'no-console': process.env.NODE_ENV === 'production' ? 'error' : 'off',
       'no-debugger': process.env.NODE_ENV === 'production' ? 'error' : 'off',
+      'comma-dangle': ['error', 'never'],
       '@typescript-eslint/no-unused-vars': [
         'warn',
         {
           argsIgnorePattern: 'next|err|info|reject|^_',
-          caughtErrorsIgnorePattern: '^_',
-        },
+          caughtErrorsIgnorePattern: '^_'
+        }
       ],
       'jsdoc/require-description': 'warn',
-      'security/detect-object-injection': 'warn',
-    },
-  },
+      'security/detect-object-injection': 'warn'
+    }
+  }
 ];

@@ -16,7 +16,7 @@ import {
   isValidRemoteUrl,
   lonLatToTilePixel,
   setCacheControl,
-  setHostDerivedCacheControl,
+  setHostDerivedCacheControl
 } from './utils.js'
 import { getPMtilesInfo, openPMtiles } from './pmtiles_adapter.js'
 import { gunzipP, gzipP } from './promises.js'
@@ -30,8 +30,8 @@ let metricsModule = null
 const packageJson = JSON.parse(
   fs.readFileSync(
     path.dirname(fileURLToPath(import.meta.url)) + '/../package.json',
-    'utf8',
-  ),
+    'utf8'
+  )
 )
 
 const isLight = packageJson.name.slice(-6) === '-light'
@@ -78,7 +78,7 @@ export const serve_data = {
           String(req.params.z).replace(/\n|\r/g, ''),
           String(req.params.x).replace(/\n|\r/g, ''),
           String(req.params.y).replace(/\n|\r/g, ''),
-          String(req.params.format).replace(/\n|\r/g, ''),
+          String(req.params.format).replace(/\n|\r/g, '')
         )
       }
 
@@ -120,7 +120,7 @@ export const serve_data = {
         item.sourceType,
         z,
         x,
-        y,
+        y
       )
       if (fetchTile == null) {
         // sparse=true (default) -> 404 (allows overzoom)
@@ -150,7 +150,7 @@ export const serve_data = {
             data,
             z,
             x,
-            y,
+            y
           )
         }
       }
@@ -162,7 +162,7 @@ export const serve_data = {
         const tile = new VectorTile(new PbfReader(data))
         const geojson = {
           type: 'FeatureCollection',
-          features: [],
+          features: []
         }
         for (const layerName in tile.layers) {
           // eslint-disable-next-line security/detect-object-injection -- layerName from VectorTile library internal data structure
@@ -214,7 +214,7 @@ export const serve_data = {
       if (metricsModule) {
         metricsModule.tilesServedTotal.inc({
           type: 'vector',
-          name: req.params.id,
+          name: req.params.id
         })
       }
       return res.status(200).send(data)
@@ -279,7 +279,7 @@ export const serve_data = {
         format,
         tileSize: tileJSON.tileSize || 512,
         minzoom: tileJSON.minzoom,
-        maxzoom: tileJSON.maxzoom,
+        maxzoom: tileJSON.maxzoom
       }
     }
 
@@ -319,7 +319,7 @@ export const serve_data = {
         format,
         tileSize,
         minzoom,
-        maxzoom,
+        maxzoom
       } = sourceInfo
 
       // Group points by tile (including zoom level in the key)
@@ -338,7 +338,7 @@ export const serve_data = {
           point.lon,
           point.lat,
           zoom,
-          tileSize,
+          tileSize
         )
         const tileKey = `${zoom},${tileX},${tileY}`
         if (!tileGroups.has(tileKey)) {
@@ -358,7 +358,7 @@ export const serve_data = {
           sourceType,
           zoom,
           tileX,
-          tileY,
+          tileY
         )
         if (fetchTile == null) {
           continue
@@ -367,7 +367,7 @@ export const serve_data = {
         const elevations = await serve_rendered.getBatchElevationsFromTile(
           fetchTile.data,
           { encoding, format, tile_size: tileSize },
-          pixels,
+          pixels
         )
         for (const { index, elevation } of elevations) {
           // eslint-disable-next-line security/detect-object-injection -- index is from internal elevation processing
@@ -395,7 +395,7 @@ export const serve_data = {
             String(req.params.id).replace(/\n|\r/g, ''),
             String(req.params.z).replace(/\n|\r/g, ''),
             String(req.params.x).replace(/\n|\r/g, ''),
-            String(req.params.y).replace(/\n|\r/g, ''),
+            String(req.params.y).replace(/\n|\r/g, '')
           )
         }
 
@@ -433,7 +433,7 @@ export const serve_data = {
         }
 
         const results = await getBatchElevations(sourceInfo, [
-          { lon, lat, z: zoom },
+          { lon, lat, z: zoom }
         ])
 
         if (results[0] == null) {
@@ -443,13 +443,13 @@ export const serve_data = {
         // Build response matching original format
         const clampedZoom = Math.min(
           Math.max(zoom, sourceInfo.minzoom),
-          sourceInfo.maxzoom,
+          sourceInfo.maxzoom
         )
         const { tileX, tileY, pixelX, pixelY } = lonLatToTilePixel(
           lon,
           lat,
           clampedZoom,
-          sourceInfo.tileSize,
+          sourceInfo.tileSize
         )
 
         // Derived from the same immutable tiles, so cacheable on the same terms.
@@ -462,11 +462,11 @@ export const serve_data = {
           x: tileX,
           y: tileY,
           pixelX,
-          pixelY,
+          pixelY
         })
       } catch (err) {
         // Log the detail server-side; the message can carry filesystem paths or S3 bucket/key names, so return only a generic reason to the client.
-        console.error('Elevation request failed:', err && err.stack ? err.stack : err,)
+        console.error('Elevation request failed:', err && err.stack ? err.stack : err)
         return res
           .status(500)
           .header('Content-Type', 'text/plain')
@@ -506,7 +506,7 @@ export const serve_data = {
         res.status(200).json(results)
       } catch (err) {
         // Log the detail server-side; the message can carry filesystem paths or S3 bucket/key names, so return only a generic reason to the client.
-        console.error('Elevation request failed:', err && err.stack ? err.stack : err,)
+        console.error('Elevation request failed:', err && err.stack ? err.stack : err)
         return res
           .status(500)
           .header('Content-Type', 'text/plain')
@@ -524,7 +524,7 @@ export const serve_data = {
     app.get('/:id.json', (req, res) => {
       if (verbose >= 1) {
         console.log(`Handling tilejson request for: /data/%s.json`,
-          String(req.params.id).replace(/\n|\r/g, ''),
+          String(req.params.id).replace(/\n|\r/g, '')
         )
       }
 
@@ -542,13 +542,13 @@ export const serve_data = {
         info.format,
         item.publicUrl,
         {
-          pbf: options.pbfAlias,
+          pbf: options.pbfAlias
         },
-        allowedHosts,
+        allowedHosts
       )
       setHostDerivedCacheControl(res, options, 'metadata', {
         publicUrl: item.publicUrl,
-        allowedHosts,
+        allowedHosts
       })
       return res.send(info)
     })
@@ -582,7 +582,7 @@ export const serve_data = {
       inputType = 'mbtiles'
       // MBTiles does not support remote URLs
       if (isValidRemoteUrl(params.mbtiles)) {
-        console.log(`ERROR: MBTiles does not support remote files. "${params.mbtiles}" is not a valid data file.`,)
+        console.log(`ERROR: MBTiles does not support remote files. "${params.mbtiles}" is not a valid data file.`)
         process.exit(1)
       } else {
         inputFile = path.resolve(options.paths.mbtiles, params.mbtiles)
@@ -594,7 +594,7 @@ export const serve_data = {
     }
 
     let tileJSON = {
-      tiles: params.domains || options.domains,
+      tiles: params.domains || options.domains
     }
 
     // Only check file stats for local files, not remote URLs
@@ -606,7 +606,7 @@ export const serve_data = {
         }
       } catch (_err) {
         if (ignoreMissingFiles) {
-          console.log(`WARN: Data source '${id}' file not found: "${inputFile}" - skipping`,)
+          console.log(`WARN: Data source '${id}' file not found: "${inputFile}" - skipping`)
           return
         }
         throw Error(`Not valid input file: "${inputFile}"`, { cause: _err })
@@ -628,7 +628,7 @@ export const serve_data = {
           params.requestPayer,
           params.s3Region,
           params.s3UrlFormat,
-          verbose,
+          verbose
         )
         sourceType = 'pmtiles'
         const metadata = await getPMtilesInfo(source, inputFile)
@@ -642,7 +642,7 @@ export const serve_data = {
       }
     } catch (err) {
       if (ignoreMissingFiles) {
-        console.log(`WARN: Unable to open data source '${id}' from "${inputFile}": ${err.message} - skipping (requests will return 404)`,)
+        console.log(`WARN: Unable to open data source '${id}' from "${inputFile}": ${err.message} - skipping (requests will return 404)`)
         return
       }
       throw err
@@ -673,7 +673,7 @@ export const serve_data = {
       publicUrl,
       source,
       sourceType,
-      sparse,
+      sparse
     }
   },
   /**
@@ -698,7 +698,7 @@ export const serve_data = {
           // eslint-disable-next-line security/detect-object-injection -- id is from Object.keys() iteration
           delete repo[id]
         }
-      }),
+      })
     )
-  },
+  }
 }

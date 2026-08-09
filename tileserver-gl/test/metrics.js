@@ -16,7 +16,7 @@ function httpGet(url) {
         let body = '';
         res.on('data', (chunk) => (body += chunk));
         res.on('end', () =>
-          resolve({ statusCode: res.statusCode, headers: res.headers, body }),
+          resolve({ statusCode: res.statusCode, headers: res.headers, body })
         );
       })
       .on('error', reject);
@@ -35,7 +35,7 @@ describe('Prometheus metrics', function () {
       port: 8889,
       publicUrl: '/test/',
       metrics: true,
-      metricsPort: 9999,
+      metricsPort: 9999
     });
     tileServer = running.server;
     metricsServer = running.metricsServer;
@@ -50,7 +50,7 @@ describe('Prometheus metrics', function () {
 
   it('GET /metrics returns 200 with text/plain content type', async function () {
     const { statusCode, headers } = await httpGet(
-      'http://localhost:9999/metrics',
+      'http://localhost:9999/metrics'
     );
     expect(statusCode).to.equal(200);
     expect(headers['content-type']).to.include('text/plain');
@@ -77,7 +77,7 @@ describe('Prometheus metrics', function () {
       port: 8890,
       publicUrl: '/test/',
       metrics: false,
-      metricsPort: 9998,
+      metricsPort: 9998
     })
       .then((running) => {
         running.startupPromise

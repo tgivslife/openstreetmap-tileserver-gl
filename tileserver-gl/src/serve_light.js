@@ -8,5 +8,5 @@ export const serve_rendered = {
   clear: (repo) => {},
   getBatchElevationsFromTile: (data, param, pixels) => {
     return pixels.map(({ index }) => ({ index, elevation: null }))
-  },
+  }
 }

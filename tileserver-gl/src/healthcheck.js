@@ -13,7 +13,7 @@ const request = http.request(
   (res) => {
     console.log(`STATUS: ${res.statusCode}`)
     process.exit(res.statusCode === 200 ? 0 : 1)
-  },
+  }
 )
 
 // Without a 'timeout' handler the request just idles on a hung server until Docker's own (default 30s) timeout fires, ~15x slower than the intended 2s.
