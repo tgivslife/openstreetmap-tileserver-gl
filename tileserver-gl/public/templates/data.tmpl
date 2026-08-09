@@ -6,9 +6,8 @@
   <title>{{name}} - TileServer GL</title>
   {{#use_maplibre}}
   <link rel="stylesheet" type="text/css" href="{{public_url}}maplibre-gl.css{{&key_query}}" />
-  <link rel="stylesheet" type="text/css" href="{{public_url}}maplibre-gl-inspect.css{{&key_query}}" />
+  <!-- maplibre-gl.js bundles maplibre-gl v6 + the inspect plugin (esbuild); it exposes window.maplibregl and window.MaplibreInspect. -->
   <script src="{{public_url}}maplibre-gl.js{{&key_query}}"></script>
-  <script src="{{public_url}}maplibre-gl-inspect.js{{&key_query}}"></script>
   {{^is_light}}
   <script src="{{public_url}}elevation-control.js{{&key_query}}"></script>
   {{/is_light}}
@@ -124,6 +123,19 @@
       hash: true,
       maxPitch: 85,
       style: style
+    });
+
+    // v6 warns for any icon-image a style names but its sprite lacks.
+    // Resolve each to an invisible 1x1 pixel, matching the sprite's SDF-ness (streets/basic are SDF, osm-openmaptiles isn't)
+    // so it doesn't trip "Cannot mix SDF and non-SDF icons".
+    map.setMissingStyleImageResolver(function (id) {
+      if (map.hasImage(id)) return;
+      var sdf = false, existing = map.listImages();
+      for (var i = 0; i < existing.length; i++) {
+        var img = map.getImage(existing[i]);
+        if (img) { sdf = !!img.sdf; break; }
+      }
+      map.addImage(id, { width: 1, height: 1, data: new Uint8Array(4) }, { sdf: sdf });
     });
 
     map.addControl(new maplibregl.GlobeControl());

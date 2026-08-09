@@ -38,6 +38,9 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
 WORKDIR /usr/src/app
 
 COPY package.json package-lock.json ./
+# The esbuild entry for the viewer bundle must exist before `npm ci` runs the
+# `prepare` lifecycle script, which builds public/resources/maplibre-gl.js from it.
+COPY scripts ./scripts
 
 RUN npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 100000 && \
@@ -58,6 +61,8 @@ RUN rm -rf \
       node_modules/@maplibre/maplibre-gl-inspect \
       node_modules/@mapbox/mapbox-gl-rtl-text \
       node_modules/copyfiles \
+      node_modules/esbuild \
+      node_modules/@esbuild \
       node_modules/node-gyp \
       node_modules/@octokit \
       node_modules/@acalcutt

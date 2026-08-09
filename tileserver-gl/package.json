@@ -18,12 +18,14 @@
     "LICENSE"
   ],
   "scripts": {
-    "prepare": "npm run copy:maplibre && npm run copy:maplibre-inspect && npm run copy:mapbox-rtl-text && npm run copy:leaflet && npm run copy:leaflet-hash",
-    "copy:maplibre": "copyfiles -EVf node_modules/maplibre-gl/dist/maplibre-gl.js node_modules/maplibre-gl/dist/maplibre-gl.js.map node_modules/maplibre-gl/dist/maplibre-gl.css public/resources/",
-    "copy:maplibre-inspect": "copyfiles -EVf node_modules/@maplibre/maplibre-gl-inspect/dist/maplibre-gl-inspect.js node_modules/@maplibre/maplibre-gl-inspect/dist/maplibre-gl-inspect.js.map node_modules/@maplibre/maplibre-gl-inspect/dist/maplibre-gl-inspect.css  public/resources/",
+    "prepare": "npm run build:maplibre && npm run copy:mapbox-rtl-text && npm run copy:leaflet && npm run build:leaflet-hash && npm run build:elevation-control",
+    "build:maplibre": "npm run build:maplibre:main && npm run build:maplibre:worker",
+    "build:maplibre:main": "esbuild scripts/viewer-bundle.js --bundle --minify --sourcemap --format=iife --outfile=public/resources/maplibre-gl.js",
+    "build:maplibre:worker": "esbuild maplibre-gl/dist/maplibre-gl-worker.mjs --bundle --minify --sourcemap --format=esm --outfile=public/resources/maplibre-gl-worker.js",
     "copy:mapbox-rtl-text": "copyfiles -EVf node_modules/@mapbox/mapbox-gl-rtl-text/dist/mapbox-gl-rtl-text.js public/resources/",
     "copy:leaflet": "copyfiles -EVf node_modules/leaflet/dist/leaflet.js node_modules/leaflet/dist/leaflet.js.map node_modules/leaflet/dist/leaflet.css node_modules/leaflet/dist/leaflet-hash.js public/resources/",
-    "copy:leaflet-hash": "copyfiles -EVf node_modules/leaflet-hash/leaflet-hash.js public/resources/",
+    "build:leaflet-hash": "esbuild node_modules/leaflet-hash/leaflet-hash.js --minify --outfile=public/resources/leaflet-hash.js",
+    "build:elevation-control": "esbuild scripts/elevation-control.js --minify --outfile=public/resources/elevation-control.js",
     "test": "mocha test/**.js --timeout 10000 --exit",
     "test-docker": "xvfb-run npm test",
     "test:visual:generate": "cross-env GENERATE_FIXTURES=true mocha test/setup.js test/static_images.js --timeout 10000 --exit",
@@ -38,6 +40,7 @@
   "allowScripts": {
     "@maplibre/maplibre-gl-native@6.4.1": true,
     "canvas@3.2.3": true,
+    "esbuild@0.28.2": true,
     "sqlite3@5.1.7": true
   },
   "dependencies": {
@@ -60,12 +63,13 @@
     "commander": "15.0.0",
     "copyfiles": "2.4.1",
     "cors": "2.8.6",
+    "esbuild": "0.28.2",
     "express": "5.2.1",
     "handlebars": "4.7.9",
     "http-shutdown": "1.2.2",
     "leaflet": "1.9.4",
     "leaflet-hash": "0.2.1",
-    "maplibre-gl": "5.24.0",
+    "maplibre-gl": "^6.2.0",
     "morgan": "1.11.0",
     "pbf": "5.1.2",
     "pmtiles": "4.4.1",
