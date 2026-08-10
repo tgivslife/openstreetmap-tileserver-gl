@@ -60,7 +60,6 @@ RUN rm -rf \
       node_modules/leaflet-hash \
       node_modules/@maplibre/maplibre-gl-inspect \
       node_modules/@mapbox/mapbox-gl-rtl-text \
-      node_modules/copyfiles \
       node_modules/esbuild \
       node_modules/@esbuild \
       node_modules/node-gyp \

@@ -18,12 +18,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "prepare": "npm run build:maplibre && npm run copy:mapbox-rtl-text && npm run copy:leaflet && npm run build:leaflet-hash && npm run build:elevation-control",
+    "prepare": "npm run build:maplibre && npm run copy:assets && npm run build:leaflet-hash && npm run build:elevation-control",
     "build:maplibre": "npm run build:maplibre:main && npm run build:maplibre:worker",
     "build:maplibre:main": "esbuild scripts/viewer-bundle.js --bundle --minify --sourcemap --format=iife --outfile=public/resources/maplibre-gl.js",
     "build:maplibre:worker": "esbuild maplibre-gl/dist/maplibre-gl-worker.mjs --bundle --minify --sourcemap --format=esm --outfile=public/resources/maplibre-gl-worker.js",
-    "copy:mapbox-rtl-text": "copyfiles -EVf node_modules/@mapbox/mapbox-gl-rtl-text/dist/mapbox-gl-rtl-text.js public/resources/",
-    "copy:leaflet": "copyfiles -EVf node_modules/leaflet/dist/leaflet.js node_modules/leaflet/dist/leaflet.js.map node_modules/leaflet/dist/leaflet.css node_modules/leaflet/dist/leaflet-hash.js public/resources/",
+    "copy:assets": "node scripts/copy-assets.js",
     "build:leaflet-hash": "esbuild node_modules/leaflet-hash/leaflet-hash.js --minify --outfile=public/resources/leaflet-hash.js",
     "build:elevation-control": "esbuild scripts/elevation-control.js --minify --outfile=public/resources/elevation-control.js",
     "test": "mocha test/**.js --timeout 10000 --exit",
@@ -61,7 +60,6 @@
     "clone": "2.1.2",
     "color": "5.0.3",
     "commander": "15.0.0",
-    "copyfiles": "2.4.1",
     "cors": "2.8.6",
     "esbuild": "0.28.2",
     "express": "5.2.1",
@@ -85,7 +83,8 @@
     "tar": "^7.5.22",
     "node-gyp": "^11.4.2",
     "serialize-javascript": "^7.0.7",
-    "diff": "^8.0.3"
+    "diff": "^8.0.3",
+    "glob": "^13.0.6"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.1",
@@ -96,7 +95,7 @@
     "chai": "6.2.2",
     "cross-env": "^10.1.0",
     "eslint": "^10.8.1",
-    "eslint-plugin-jsdoc": "^63.3.3",
+    "eslint-plugin-jsdoc": "^64.0.2",
     "eslint-plugin-security": "^4.0.1",
     "globals": "^17.9.0",
     "lint-staged": "^17.3.0",
