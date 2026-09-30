@@ -39,6 +39,7 @@ import {
 } from './utils.js'
 import { getPMtilesInfo, openPMtiles } from './pmtiles_adapter.js'
 import { renderAttribution, renderOverlay, renderWatermark } from './render.js'
+import { getMapLibreRenderZoom } from './render_mode.js'
 import fsp from 'node:fs/promises'
 import { existsP, gunzipP } from './promises.js'
 import { openMbTilesWrapper } from './mbtiles_wrapper.js'
@@ -672,13 +673,7 @@ async function respondImage (
       return
     }
 
-    // For 512px tiles, use the actual maplibre-native zoom. For 256px tiles, use zoom - 1
-    let mlglZ
-    if (width === 512) {
-      mlglZ = Math.max(0, z)
-    } else {
-      mlglZ = Math.max(0, z - 1)
-    }
+    const mlglZ = getMapLibreRenderZoom(z, width, mode)
 
     const params = {
       zoom: mlglZ,
