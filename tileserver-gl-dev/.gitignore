@@ -1,0 +1,2 @@
+# MinIO AIStor licence key (compose.s3.yml mounts it into the minio service). Secret: never commit.
+minio.license

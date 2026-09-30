@@ -19,9 +19,13 @@
 #
 #      docker compose -f compose.s3.yml --profile setup run --rm convert
 #
-#    It writes ./data/pmtiles/romania.pmtiles and errors if that file already exists — delete it to regenerate.
+#    It writes ./data/pmtiles/planet.pmtiles (the name minio-setup uploads and PMTILES_URL reads) and errors if that file
+#    already exists — delete it to regenerate. Locally the source mbtiles is the Romania extract, so "planet" covers Romania only.
 #
-# 3. Bring the stack up:
+# 3. Put a MinIO AIStor licence key (the Free licence from min.io works) at ./minio.license. It is gitignored — never commit it.
+#    AIStor starts without one but runs in offline mode and denies every S3 operation, so minio-setup fails at `mc mb`.
+#
+# 4. Bring the stack up:
 #
 #      docker compose -f compose.s3.yml up -d
 #
@@ -29,7 +33,7 @@
 #      Tileserver    : http://localhost:8082
 #      A tile        : http://localhost:8082/data/planet-s3/10/582/366.pbf
 #
-# 4. Tear down (add -v to also drop the MinIO volume):
+# 5. Tear down (add -v to also drop the MinIO volume):
 #
 #      docker compose -f compose.s3.yml down
 #
@@ -46,11 +50,10 @@ x-minio-creds: &minio-creds
 
 services:
   minio:
-    # Pinned for reproducibility. This is the last community release that still
-    # ships the full web console the step-3 instructions above use; later builds
-    # stripped it. Bump deliberately, not implicitly via :latest.
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: server /data --console-address ":9001"
+    # MinIO AIStor: the community minio/minio and minio/mc images are no longer published. Needs the licence from step 3.
+    # Pinned for reproducibility. Bump deliberately, not implicitly via :latest.
+    image: quay.io/minio/aistor/minio:RELEASE.2026-09-19T17-05-25Z
+    command: server /data --console-address ":9001" --license /minio.license
     environment:
       <<: *minio-creds
     ports:
@@ -58,6 +61,7 @@ services:
       - "9101:9001" # web console
     volumes:
       - minio_data:/data
+      - ./minio.license:/minio.license:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -66,7 +70,7 @@ services:
 
   # One-shot: create the (private) bucket and upload the tileset, then exit.
   minio-setup:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: quay.io/minio/aistor/mc:RELEASE.2026-09-19T15-24-59Z
     depends_on:
       minio:
         condition: service_healthy
@@ -136,7 +140,7 @@ services:
     ports:
       - "8082:8080"
 
-  # Optional one-time tileset generation (mbtiles -> pmtiles), see header step 1.
+  # Optional one-time tileset generation (mbtiles -> pmtiles), see header step 2.
   convert:
     image: protomaps/go-pmtiles:v1.31.2
     profiles: ["setup"]
@@ -144,7 +148,7 @@ services:
       - ./data/mbtiles:/mb:ro
       - ./data/pmtiles:/pm
     command:
-      ["convert", "/mb/romania-latest.tilemaker.mbtiles", "/pm/romania.pmtiles"]
+      ["convert", "/mb/romania-latest.tilemaker.mbtiles", "/pm/planet.pmtiles"]
 
 volumes:
   minio_data:
