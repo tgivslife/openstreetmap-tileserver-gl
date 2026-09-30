@@ -33,7 +33,9 @@ import {
   isValidHttpUrl,
   isValidRemoteUrl,
   listFonts,
+  parseOptionalBoolean,
   readFile,
+  resolveSparse,
   setCacheControl,
   setHostDerivedCacheControl
 } from './utils.js'
@@ -1383,9 +1385,6 @@ export const serve_rendered = {
 
     const styleJSON = clone(style)
 
-    // Global sparse flag for HTTP/remote sources (from config options)
-    const globalSparse = options.sparse ?? true
-
     /**
      * Answers one resource request from a renderer: sprites, glyphs, local tiles, remote URLs and files.
      * A throw is answered by the wrapper in createRenderer, which turns it into an error callback.
@@ -1453,9 +1452,14 @@ export const serve_rendered = {
           if (verbose >= 2) {
             console.log('fetchTile null on %s', req.url)
           }
-          // eslint-disable-next-line security/detect-object-injection -- sourceId from internal style source names
-          const sparse = map.sparseFlags[sourceId] ?? true
-          // sparse=true (default) -> return empty callback so MapLibre can overzoom
+          // Archive metadata was already folded into sparseFlags at load time.
+          const sparse = resolveSparse({
+            // eslint-disable-next-line security/detect-object-injection -- sourceId from internal style source names
+            perSource: map.sparseFlags[sourceId],
+            globalOption: options.sparse,
+            isVector: format === 'pbf'
+          })
+          // sparse=true -> return empty callback so MapLibre can overzoom
           if (sparse) {
             callback()
             return
@@ -1501,6 +1505,15 @@ export const serve_rendered = {
         const timeoutMs = (fetchTimeout && Number(fetchTimeout)) || 15000
         let timeoutId
 
+        const extension = path.extname(url.parse(req.url).pathname).toLowerCase()
+        // eslint-disable-next-line security/detect-object-injection -- extension is from path.extname, limited set
+        const format = extensionToFormat[extension] || ''
+        // A raw remote URL has neither per-source config nor archive metadata, so only the global option and the format decide.
+        const sparse = resolveSparse({
+          globalOption: options.sparse,
+          isVector: extension === '.pbf'
+        })
+
         try {
           timeoutId = setTimeout(() => controller.abort(), timeoutMs)
           const response = await fetch(req.url, {
@@ -1510,10 +1523,6 @@ export const serve_rendered = {
 
           // HTTP 204 No Content means "empty tile" - generate a blank tile
           if (response.status === 204) {
-            const parts = url.parse(req.url)
-            const extension = path.extname(parts.pathname).toLowerCase()
-            // eslint-disable-next-line security/detect-object-injection -- extension is from path.extname, limited set
-            const format = extensionToFormat[extension] || ''
             createEmptyResponse(format, '', callback)
             return
           }
@@ -1524,23 +1533,19 @@ export const serve_rendered = {
                 'fetchTile HTTP %d on %s, %s',
                 response.status,
                 req.url,
-                globalSparse
+                sparse
                   ? 'allowing overzoom'
                   : 'creating empty tile'
               )
             }
 
-            if (globalSparse) {
+            if (sparse) {
               // sparse=true -> allow overzoom
               callback()
               return
             }
 
-            // sparse=false (default) -> create empty tile
-            const parts = url.parse(req.url)
-            const extension = path.extname(parts.pathname).toLowerCase()
-            // eslint-disable-next-line security/detect-object-injection -- extension is from path.extname, limited set
-            const format = extensionToFormat[extension] || ''
+            // sparse=false -> create empty tile
             createEmptyResponse(format, '', callback)
             return
           }
@@ -1579,17 +1584,13 @@ export const serve_rendered = {
           // Log all other errors
           console.error(`Error fetching remote URL ${req.url}:`, error.message || error)
 
-          if (globalSparse) {
+          if (sparse) {
             // sparse=true -> allow overzoom
             callback()
             return
           }
 
-          // sparse=false (default) -> create empty tile
-          const parts = url.parse(req.url)
-          const extension = path.extname(parts.pathname).toLowerCase()
-          // eslint-disable-next-line security/detect-object-injection -- extension is from path.extname, limited set
-          const format = extensionToFormat[extension] || ''
+          // sparse=false -> create empty tile
           createEmptyResponse(format, '', callback)
         }
       } else if (protocol === 'file') {
@@ -1828,6 +1829,9 @@ export const serve_rendered = {
             `pmtiles://${name}/{z}/{x}/{y}.${metadata.format || 'pbf'}`
           ]
           delete source.scheme
+          // Object.assign copied the archive metadata onto the style source, so `sparse` sits there unparsed ("false" is truthy).
+          // sparseFlags below holds the value the request handler reads, so drop the raw copy before the data decorator sees it.
+          delete source.sparse
 
           if (
             !attributionOverride &&
@@ -1842,11 +1846,13 @@ export const serve_rendered = {
             }
           }
 
-          // Set sparse flag: user config overrides format-based default
-          // Vector tiles (pbf) default to false (204), raster tiles default to true (404)
-          const isVector = metadata.format === 'pbf'
           // eslint-disable-next-line security/detect-object-injection -- name is from style sources object keys
-          map.sparseFlags[name] = dataInfo.sparse ?? options.sparse ?? !isVector
+          map.sparseFlags[name] = resolveSparse({
+            perSource: dataInfo.sparse,
+            globalOption: options.sparse,
+            metadata: parseOptionalBoolean(metadata.sparse),
+            isVector: metadata.format === 'pbf'
+          })
         } else {
           // MBTiles does not support remote URLs
 
@@ -1876,6 +1882,9 @@ export const serve_rendered = {
             `mbtiles://${name}/{z}/{x}/{y}.${info.format || 'pbf'}`
           ]
           delete source.scheme
+          // Object.assign copied the archive metadata onto the style source, so `sparse` sits there unparsed ("false" is truthy).
+          // sparseFlags below holds the value the request handler reads, so drop the raw copy before the data decorator sees it.
+          delete source.sparse
 
           if (options.dataDecoratorFunc) {
             source = options.dataDecoratorFunc(name, 'tilejson', source)
@@ -1894,11 +1903,13 @@ export const serve_rendered = {
             }
           }
 
-          // Set sparse flag: user config overrides format-based default
-          // Vector tiles (pbf) default to false (204), raster tiles default to true (404)
-          const isVector = info.format === 'pbf'
           // eslint-disable-next-line security/detect-object-injection -- name is from style sources object keys
-          map.sparseFlags[name] = dataInfo.sparse ?? options.sparse ?? !isVector
+          map.sparseFlags[name] = resolveSparse({
+            perSource: dataInfo.sparse,
+            globalOption: options.sparse,
+            metadata: parseOptionalBoolean(info.sparse),
+            isVector: info.format === 'pbf'
+          })
         }
       }
     }

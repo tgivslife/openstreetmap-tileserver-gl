@@ -595,8 +595,9 @@ async function start (opts) {
                     resolvedS3Region = sourceData.s3Region
                   }
 
-                  // Get sparse: per-source overrides global, default to true
-                  resolvedSparse = sourceData.sparse ?? options.sparse ?? true
+                  // Pass the source's own setting through untouched: resolveSparse() applies the global option, the archive metadata
+                  // and the format default where the tile format is known. Defaulting here made the format default unreachable.
+                  resolvedSparse = sourceData.sparse
 
                   break // Found our match, exit the outer loop
                 }
@@ -619,7 +620,7 @@ async function start (opts) {
                 requestPayer: false,
                 s3Region: undefined,
                 s3UrlFormat: undefined,
-                sparse: true
+                sparse: undefined
               }
             }
 

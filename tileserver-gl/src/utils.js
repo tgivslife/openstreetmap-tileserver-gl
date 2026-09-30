@@ -663,6 +663,49 @@ export async function fetchTileData (source, sourceType, z, x, y) {
 }
 
 /**
+ * Reads a flag that may arrive as a boolean or as text.
+ *
+ * MBTiles metadata is a table of strings, so a `sparse` row arrives as "false" - truthy at face value. PMTiles metadata is JSON and
+ * can hold a real boolean. Anything unrecognised is treated as absent, so a typo falls through to the next level of precedence
+ * instead of silently meaning true.
+ * @param {unknown} value - The raw value.
+ * @returns {boolean|undefined} The boolean, or undefined if absent or unrecognised.
+ */
+export function parseOptionalBoolean (value) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true' || normalized === '1') {
+      return true
+    }
+    if (normalized === 'false' || normalized === '0') {
+      return false
+    }
+  }
+  return undefined
+}
+
+/**
+ * Resolves whether a source answers a missing tile sparsely.
+ *
+ * Precedence, highest first: the source's own config setting, the global config option, the archive's metadata, then the format:
+ * raster sources are sparse so MapLibre overzooms from the parent, vector sources are not so an empty tile stops the overzoom.
+ * Config outranks metadata because an operator can change their config but not always the archive. Nullish coalescing is deliberate:
+ * an explicit false at any level wins over the levels below it. Named arguments, since two of the levels are often absent.
+ * @param {object} levels - The values to resolve between.
+ * @param {boolean} [levels.perSource] - The source's own `sparse` config setting.
+ * @param {boolean} [levels.globalOption] - The top-level `sparse` option.
+ * @param {boolean} [levels.metadata] - `sparse` from the archive's metadata, already parsed.
+ * @param {boolean} levels.isVector - Whether the source serves vector tiles.
+ * @returns {boolean} True when a missing tile answers 404 (overzoom) rather than 204 (empty tile).
+ */
+export function resolveSparse ({ perSource, globalOption, metadata, isVector }) {
+  return perSource ?? globalOption ?? metadata ?? !isVector
+}
+
+/**
  * Default Cache-Control values per response category.
  *
  * `tile` and `metadata` describe content that only changes when the archives or styles are rebuilt, so they carry a day
