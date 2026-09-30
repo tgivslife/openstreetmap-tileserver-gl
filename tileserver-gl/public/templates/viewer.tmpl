@@ -39,27 +39,63 @@
   <h1 style="display:none;">{{name}}</h1>
   <div id='map'></div>
   <script>
-    function isWebglSupported() {
-        if (window.WebGLRenderingContext) {
+    // MapLibre GL JS 6 needs WebGL 2; a browser with only WebGL 1 cannot run the vector view.
+    function isWebgl2Supported() {
+        if (window.WebGL2RenderingContext) {
             const canvas = document.createElement('canvas');
             try {
-                const context = canvas.getContext('webgl2') || canvas.getContext('webgl');
+                const context = canvas.getContext('webgl2');
                 if (context && typeof context.getParameter == 'function') {
                     return true;
                 }
             } catch (e) {
-                // WebGL is supported, but disabled
+                // WebGL 2 is supported, but disabled
             }
             return false;
         }
-        // WebGL not supported
+        // WebGL 2 not supported
         return false;
+    }
+    // The light image does not render raster tiles, so it has no view to fall back to.
+    var rasterAvailable = {{#if is_light}}false{{else}}true{{/if}};
+
+    // Swaps #map for an empty element: a MapLibre constructor that throws may already have filled the old one.
+    function freshMapContainer() {
+      var old = document.getElementById('map');
+      var fresh = document.createElement('div');
+      fresh.id = 'map';
+      old.parentNode.replaceChild(fresh, old);
+      return fresh;
+    }
+
+    function showMapUnavailable() {
+      var container = freshMapContainer();
+      container.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:24px;' +
+        'box-sizing:border-box;font-family:sans-serif;text-align:center;color:#333;background:#f4f4f4;';
+      container.textContent = 'This map needs WebGL 2, which this browser does not provide or has turned off. ' +
+        'Try another browser, or enable hardware acceleration.';
+    }
+
+    // Returns null when MapLibre cannot start - since 6.7 its constructor throws when the WebGL 2 context cannot be created.
+    function createVectorMap() {
+      try {
+        return new maplibregl.Map({
+          container: 'map',
+          style: '{{public_url}}styles/{{id}}/style.json' + keyParam,
+          hash: true,
+          maxPitch: 85
+        });
+      } catch (err) {
+        console.error('Vector map unavailable:', err);
+        freshMapContainer();
+        return null;
+      }
     }
     var q = (location.search || '').substr(1).split('&');
     var preference =
-      q.indexOf('vector') >= 0 ? 'vector' :
+      !rasterAvailable || q.indexOf('vector') >= 0 ? 'vector' :
         (q.indexOf('raster') >= 0 ? 'raster' :
-          (isWebglSupported() ? 'vector' : 'raster'));
+          (isWebgl2Supported() ? 'vector' : 'raster'));
 
     var keyMatch = location.search.match(/[\?\&]key=([^&]+)/i);
     var keyParam = keyMatch ? '?key=' + keyMatch[1] : '';
@@ -148,13 +184,9 @@
       }).catch(function () { /* no styles.json - leave the viewer as it is */ });
     }
 
-    if (preference == 'vector') {
-      var map = new maplibregl.Map({
-        container: 'map',
-        style: '{{public_url}}styles/{{id}}/style.json' + keyParam,
-        hash: true,
-        maxPitch: 85
-      });
+    // Falls back to the raster view when the vector map cannot start, or to a message where there is none.
+    var map = preference == 'vector' ? createVectorMap() : null;
+    if (map) {
       // v6 warns for any icon-image a style names but its sprite lacks.
       // Resolve each to an invisible 1x1 pixel, matching the sprite's SDF-ness (streets/ basic are SDF, osm-openmaptiles isn't)
       // so it doesn't trip "Cannot mix SDF and non-SDF icons".
@@ -204,8 +236,8 @@
       }));
 
       setupThemeSwitch(map, 'vector');
-    } else {
-        var map = L.map('map', { minZoom: 1, zoomControl: false });
+    } else if (rasterAvailable) {
+        map = L.map('map', { minZoom: 1, zoomControl: false });
         new L.Control.Zoom({ position: 'topright' }).addTo(map);
         
         var tile_urls = [], tile_attribution, tile_minzoom, tile_maxzoom;
@@ -258,6 +290,8 @@
         }, 0);
 
         setupThemeSwitch(map, 'raster');
+    } else {
+      showMapUnavailable();
     }
   </script>
 </body>

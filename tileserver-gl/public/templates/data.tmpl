@@ -118,12 +118,27 @@
     };
     {{/is_terrain}}
 
-    var map = new maplibregl.Map({
-      container: 'map',
-      hash: true,
-      maxPitch: 85,
-      style: style
-    });
+    var map;
+    try {
+      map = new maplibregl.Map({
+        container: 'map',
+        hash: true,
+        maxPitch: 85,
+        style: style
+      });
+    } catch (err) {
+      // Since 6.7 the constructor throws when the WebGL 2 context cannot be created. There is no raster view of this
+      // data to fall back to, so say why instead of leaving a blank page, then rethrow so the rest of this script stops.
+      var old = document.getElementById('map');
+      var notice = document.createElement('div');
+      notice.id = 'map';
+      notice.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:24px;' +
+        'box-sizing:border-box;font-family:sans-serif;text-align:center;color:#333;background:#f4f4f4;';
+      notice.textContent = 'This map needs WebGL 2, which this browser does not provide or has turned off. ' +
+        'Try another browser, or enable hardware acceleration.';
+      old.parentNode.replaceChild(notice, old);
+      throw err;
+    }
 
     // v6 warns for any icon-image a style names but its sprite lacks.
     // Resolve each to an invisible 1x1 pixel, matching the sprite's SDF-ness (streets/basic are SDF, osm-openmaptiles isn't)
