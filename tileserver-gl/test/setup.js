@@ -13,9 +13,12 @@ import { server } from '../src/server.js';
  * takes the connection, so the test talks to the other process: a random test answers 404, 303 or never. Binding to
  * 127.0.0.1 lets the kernel pick a port that is free on the address actually requested.
  *
+ * supertest 7.3 still listens on the wildcard; it only rewrites the "::" it gets back to 127.0.0.1, so the collision remains.
+ *
  * Binding to a host completes asynchronously, while supertest reads the address synchronously when the request is built.
  * So the request is built against a placeholder URL, and end() - which .end(cb), .then() and await all go through - starts
- * the server, points the request at it and hands it to supertest, which closes it once the response is in.
+ * the server, points the request at it, and closes it once the response is in. Closing it here rather than through
+ * supertest's _server matters: 7.3 only closes servers it started itself.
  */
 class LoopbackTest extends supertest.Test {
   constructor(app, method, path) {
@@ -25,11 +28,17 @@ class LoopbackTest extends supertest.Test {
   }
 
   end(fn) {
-    this._loopback.once('error', (err) => fn(err));
+    const done = (err, res) => {
+      this._loopback.close(() => {
+        if (fn) {
+          fn(err, res);
+        }
+      });
+    };
+    this._loopback.once('error', (err) => done(err));
     this._loopback.listen(0, '127.0.0.1', () => {
       this.url = `http://127.0.0.1:${this._loopback.address().port}${this._loopbackPath}`;
-      this._server = this._loopback;
-      super.end(fn);
+      super.end(done);
     });
     return this;
   }
