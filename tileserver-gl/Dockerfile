@@ -50,9 +50,10 @@ RUN npm config set fetch-retries 5 && \
     # and exits 0, which would ship an image without its native modules. After bumping canvas, sqlite3,
     # @maplibre/maplibre-gl-native or esbuild, run `npm install`, then re-pin with `npx npm@12 approve-scripts <pkg>`.
     npm ci --omit=dev --strict-allow-scripts && \
-    # Build canvas from source for the Noble architecture. node-gyp reads npm_config_* from the env;  \
-    # npm 11 rejects `--build-from-source` as an unknown CLI flag.
-    npm_config_build_from_source=true npm rebuild canvas && \
+    # Build canvas from source: its prebuilt binary bundles libpng 1.6.37, which clashes with the system libpng
+    # that maplibre-native links. Call node-gyp directly rather than steering prebuild-install through
+    # npm_config_build_from_source, which npm warns is an unknown config and will reject in a future major.
+    node_modules/.bin/node-gyp rebuild --directory=node_modules/canvas && \
     chown -R root:root /usr/src/app
 
 # Drop packages that are only needed while installing/building. \
