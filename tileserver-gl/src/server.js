@@ -236,7 +236,8 @@ async function start (opts) {
 
   // Expand ${VAR} / ${VAR:-default} from the environment in every string value, so a baked or committed config.json can point at per-deployment values
   // (e.g. an S3 URL or region) without editing the file. `:-` falls back when a variable is unset or empty (like the shell);
-  // an unset ${VAR} with no default is left as-is so the resulting error names the missing variable.
+  // a ${VAR} with no default is required: an unset or empty one is collected in missingEnvVars and aborts startup below.
+  const missingEnvVars = new Set()
   const interpolateEnv = (value) => {
     if (typeof value === 'string') {
       return value.replace(
@@ -246,7 +247,11 @@ async function start (opts) {
           if (v !== undefined && v !== '') {
             return v
           }
-          return fallback !== undefined ? fallback : match
+          if (fallback !== undefined) {
+            return fallback
+          }
+          missingEnvVars.add(name)
+          return match
         }
       )
     }
@@ -268,6 +273,12 @@ async function start (opts) {
     } catch {
       console.log('ERROR: Config file not found or invalid!')
       console.log('   See README.md for instructions and sample data.')
+      process.exit(1)
+    }
+    // Fail here, naming the variables, rather than later with an error about a literal "${VAR}" path or URL.
+    if (missingEnvVars.size > 0) {
+      console.log(`ERROR: Config file references environment variable(s) that are not set: ${[...missingEnvVars].join(', ')}`)
+      console.log('   Set them, or give each a default with ${VAR:-default}.')
       process.exit(1)
     }
   }

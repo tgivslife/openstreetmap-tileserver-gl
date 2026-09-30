@@ -115,8 +115,8 @@ in `config.json`, so the bucket never has to be public.
 
 Any string in `config.json` may reference the environment as `${VAR}` or `${VAR:-default}` (shell-style: the default
 applies when the variable is unset or empty). So a single **baked** config retargets per deployment without a rebuild —
-the S3 config uses `"pmtiles": "${PMTILES_URL:-…}"`, and you set `PMTILES_URL` (compose env, k8s env) to your bucket;
-unset, it falls back to the MinIO demo URL.
+the S3 config uses `"pmtiles": "${PMTILES_URL}"`, and you set `PMTILES_URL` (compose env, k8s env) to your bucket.
+It has no default, so a container started without it exits at startup naming the missing variable.
 [`tileserver-gl-dev/compose.s3.yml`](tileserver-gl-dev/compose.s3.yml) runs the baked
 `stsdockerhub/tileserver-gl:<ver>-light-s3` image against a local MinIO (private bucket, SigV4) end to end.
 

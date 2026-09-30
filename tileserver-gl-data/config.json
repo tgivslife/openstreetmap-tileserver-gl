@@ -62,7 +62,7 @@
   },
   "data": {
     "planet-s3": {
-      "pmtiles": "${PMTILES_URL:-s3+http://minio:9000/tiles/romania.pmtiles}",
+      "pmtiles": "${PMTILES_URL}",
       "s3Region": "${AWS_REGION:-us-east-1}"
     }
   }
