@@ -45,7 +45,6 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1106.0",
     "@jsse/pbfont": "^0.3.4",
-    "@mapbox/mapbox-gl-rtl-text": "0.4.0",
     "@mapbox/mbtiles": "0.12.1",
     "@mapbox/polyline": "^1.2.1",
     "@mapbox/sphericalmercator": "2.0.2",
@@ -67,8 +66,8 @@
     "http-shutdown": "1.2.2",
     "leaflet": "1.9.4",
     "leaflet-hash": "0.2.1",
-    "maplibre-gl": "^6.2.0",
-    "morgan": "1.11.0",
+    "maplibre-gl": "^6.11.2",
+    "morgan": "1.12.1",
     "pbf": "5.1.2",
     "pmtiles": "4.4.1",
     "proj4": "2.21.0",
@@ -76,7 +75,7 @@
     "sanitize-filename": "1.6.4",
     "secure-json-parse": "^4.1.0",
     "semver": "^7.8.5",
-    "sharp": "0.35.3",
+    "sharp": "0.35.5",
     "tileserver-gl-styles": "2.0.0"
   },
   "overrides": {

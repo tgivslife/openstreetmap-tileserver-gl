@@ -149,7 +149,6 @@
     }
 
     if (preference == 'vector') {
-      maplibregl.setRTLTextPlugin('{{public_url}}mapbox-gl-rtl-text.js' + keyParam, true);
       var map = new maplibregl.Map({
         container: 'map',
         style: '{{public_url}}styles/{{id}}/style.json' + keyParam,

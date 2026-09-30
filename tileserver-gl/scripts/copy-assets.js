@@ -2,8 +2,8 @@
 
 // Copy the prebuilt browser assets that ship as-is into public/resources.
 //
-// These are vendor files we serve verbatim rather than bundle: maplibre-gl's RTL text plugin
-// (loaded at runtime by the viewer via setRTLTextPlugin) and leaflet's own dist build.
+// These are vendor files we serve verbatim rather than bundle: leaflet's own dist build.
+// maplibre-gl shapes right-to-left text itself since 6.9, so the viewer no longer loads an RTL text plugin.
 // Everything else under public/resources is produced by the esbuild steps in the `prepare` script.
 //
 //   npm run copy:assets
@@ -19,7 +19,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const destDir = path.join(root, 'public', 'resources')
 
 const sources = [
-  'node_modules/@mapbox/mapbox-gl-rtl-text/dist/mapbox-gl-rtl-text.js',
   'node_modules/leaflet/dist/leaflet.js',
   'node_modules/leaflet/dist/leaflet.js.map',
   'node_modules/leaflet/dist/leaflet.css'

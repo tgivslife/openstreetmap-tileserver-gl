@@ -18,7 +18,6 @@ public/resources/maplibre-gl.css
 public/resources/maplibre-gl.css.map
 public/resources/maplibre-gl-worker.js
 public/resources/maplibre-gl-worker.js.map
-public/resources/mapbox-gl-rtl-text.js
 public/resources/leaflet.js
 public/resources/leaflet.js.map
 public/resources/leaflet.css
