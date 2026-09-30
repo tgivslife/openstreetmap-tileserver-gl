@@ -1,7 +1,6 @@
 // test/static_images.js
 import { describe, it } from 'mocha';
 import { expect } from 'chai';
-import supertest from 'supertest';
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
