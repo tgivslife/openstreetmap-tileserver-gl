@@ -1636,19 +1636,21 @@ export const serve_rendered = {
           request: async (req, callback) => {
             // MapLibre Native waits indefinitely for a resource whose callback never fires, wedging the renderer at 0% CPU until the
             // render timeout recycles it. Guarantee exactly one call on every path, including throws and unknown protocols.
+            // Forward exactly the arguments given: a sparse miss answers callback() with none, and the native binding rejects an
+            // explicit undefined response ("Second argument must be a response object"), which would leave the request unanswered.
             let settled = false
-            const respond = (err, response) => {
+            const respond = (...args) => {
               if (settled) {
                 return
               }
               settled = true
-              callback(err, response)
+              callback(...args)
             }
             try {
               await handleRendererRequest(req, respond)
             } catch (err) {
               console.error(`Error handling renderer request for ${req.url}:`, err)
-              respond(err, null)
+              respond(err)
             }
           }
         })
