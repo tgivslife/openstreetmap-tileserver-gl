@@ -29,7 +29,8 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends --no-install-suggests nodejs && \
-    npm i -g npm@latest && \
+    # Pinned to npm 12: the install below relies on its allowScripts gating and --strict-allow-scripts.
+    npm i -g npm@12 && \
     apt-get -y remove curl gnupg && \
     apt-get -y --purge autoremove && \
     apt-get clean && \
@@ -45,7 +46,10 @@ COPY scripts ./scripts
 RUN npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 100000 && \
     npm config set fetch-retry-maxtimeout 600000 && \
-    npm ci --omit=dev && \
+    # Fail rather than skip when a dependency's install script is not covered by package.json#allowScripts: npm 12 only warns
+    # and exits 0, which would ship an image without its native modules. After bumping canvas, sqlite3,
+    # @maplibre/maplibre-gl-native or esbuild, run `npm install`, then re-pin with `npx npm@12 approve-scripts <pkg>`.
+    npm ci --omit=dev --strict-allow-scripts && \
     # Build canvas from source for the Noble architecture. node-gyp reads npm_config_* from the env;  \
     # npm 11 rejects `--build-from-source` as an unknown CLI flag.
     npm_config_build_from_source=true npm rebuild canvas && \
