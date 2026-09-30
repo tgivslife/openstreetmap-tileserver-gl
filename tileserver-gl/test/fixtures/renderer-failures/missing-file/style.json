@@ -1,0 +1,11 @@
+{
+  "version": 8,
+  "name": "missing-file",
+  "sources": {
+    "r": { "type": "raster", "tileSize": 256, "tiles": ["file://missing/{z}/{x}/{y}.png"] }
+  },
+  "layers": [
+    { "id": "bg", "type": "background", "paint": { "background-color": "#ddeeff" } },
+    { "id": "r", "type": "raster", "source": "r" }
+  ]
+}

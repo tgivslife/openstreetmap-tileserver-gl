@@ -1,0 +1,11 @@
+{
+  "version": 8,
+  "name": "unknown-protocol",
+  "sources": {
+    "r": { "type": "raster", "tileSize": 256, "tiles": ["custom://tiles/{z}/{x}/{y}.png"] }
+  },
+  "layers": [
+    { "id": "bg", "type": "background", "paint": { "background-color": "#ddeeff" } },
+    { "id": "r", "type": "raster", "source": "r" }
+  ]
+}

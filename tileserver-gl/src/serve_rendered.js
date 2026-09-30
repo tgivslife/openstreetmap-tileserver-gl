@@ -67,6 +67,11 @@ const PATH_PATTERN =
 
 const mercator = new SphericalMercator()
 
+// Consecutive failed renders per renderer. A single render error is usually a style or tile problem, but a renderer that keeps failing
+// is itself broken and has to be replaced.
+const rendererFailures = new WeakMap()
+const MAX_CONSECUTIVE_RENDER_FAILURES = 3
+
 mlgl.on('message', (e) => {
   if (e.severity === 'WARNING' || e.severity === 'ERROR') {
     console.log('mlgl:', e)
@@ -616,8 +621,36 @@ async function respondImage (
       return
     }
 
+    // Hand the renderer back to the pool exactly once. One that is neither released nor removed stays in the pool's busy list forever,
+    // so the pool shrinks and a replacement mlgl.Map is built to take its place.
+    let returned = false
+    const releaseRenderer = () => {
+      if (returned) {
+        return
+      }
+      returned = true
+      try {
+        pool.release(renderer)
+      } catch (e) {
+        console.error('Error releasing renderer:', e)
+      }
+    }
+    const discardRenderer = (reason) => {
+      if (returned) {
+        return
+      }
+      returned = true
+      console.error(`Discarding renderer: ${reason}`)
+      try {
+        pool.removeBadObject(renderer)
+      } catch (e) {
+        console.error('Error removing bad renderer:', e)
+      }
+    }
+
     if (!renderer) {
       console.error('Renderer is null - likely crashed or failed to initialize')
+      discardRenderer('renderer is null')
       if (!res.headersSent) {
         if (metricsModule) {
           metricsModule.tileErrorsTotal.inc({ type: 'rendered', name: id })
@@ -629,12 +662,7 @@ async function respondImage (
 
     // Validate renderer has required methods (basic health check)
     if (typeof renderer.render !== 'function') {
-      console.error('Renderer is invalid - missing render method')
-      try {
-        pool.removeBadObject(renderer)
-      } catch (e) {
-        console.error('Error removing bad renderer:', e)
-      }
+      discardRenderer('missing render method')
       if (!res.headersSent) {
         if (metricsModule) {
           metricsModule.tileErrorsTotal.inc({ type: 'rendered', name: id })
@@ -677,13 +705,7 @@ async function respondImage (
 
     // Set a timeout for the render operation to detect hung renderers
     const renderTimeout = setTimeout(() => {
-      console.error('Renderer timeout - destroying hung renderer')
-
-      try {
-        pool.removeBadObject(renderer)
-      } catch (e) {
-        console.error('Error removing timed-out renderer:', e)
-      }
+      discardRenderer('render timed out - renderer is hung')
 
       if (!res.headersSent) {
         res.status(503).send('Renderer timeout')
@@ -695,16 +717,21 @@ async function respondImage (
         clearTimeout(renderTimeout)
 
         if (res.headersSent) {
-          // Timeout already fired and sent response, don't process
+          // The timeout already answered the request and discarded the renderer, so this is a no-op unless some other path responded.
+          releaseRenderer()
           return
         }
 
         if (err) {
+          // Keep a renderer that hit a one-off error: discarding on every failure churns mlgl.Map instances for what is usually a style
+          // or tile problem. Replace it only once it fails repeatedly.
           console.error('Render error:', err)
-          try {
-            pool.removeBadObject(renderer)
-          } catch (e) {
-            console.error('Error removing failed renderer:', e)
+          const failures = (rendererFailures.get(renderer) || 0) + 1
+          rendererFailures.set(renderer, failures)
+          if (failures >= MAX_CONSECUTIVE_RENDER_FAILURES) {
+            discardRenderer(`${failures} consecutive render failures`)
+          } else {
+            releaseRenderer()
           }
           if (!res.headersSent) {
             if (metricsModule) {
@@ -715,12 +742,11 @@ async function respondImage (
           return
         }
 
-        let rendererHandled = false
-        try {
-          // Only release if render was successful
-          pool.release(renderer)
-          rendererHandled = true
+        // The render succeeded, so the renderer is healthy whatever happens while building the image below.
+        rendererFailures.delete(renderer)
+        releaseRenderer()
 
+        try {
           const image = sharp(data, {
             raw: {
               premultiplied: true,
@@ -844,15 +870,8 @@ async function respondImage (
         } catch (renderCbError) {
           // A synchronous throw here (sharp setup, the watermark/attribution canvas toBuffer, or the format encoder) runs inside maplibre-native's render callback;
           // letting it escape would crash the process instead of failing just this request. Contain it and return 500.
-          // The renderer was already released on success, so only reclaim it if we threw before that.
+          // The renderer was already handed back above; the failure is in the image pipeline, not the renderer.
           console.error('Unexpected error building rendered image:', renderCbError)
-          if (!rendererHandled) {
-            try {
-              pool.removeBadObject(renderer)
-            } catch (e) {
-              console.error('Error removing renderer after callback error:', e)
-            }
-          }
           if (!res.headersSent) {
             if (metricsModule) {
               metricsModule.tileErrorsTotal.inc({ type: 'rendered', name: id })
@@ -864,11 +883,7 @@ async function respondImage (
     } catch (error) {
       clearTimeout(renderTimeout)
       console.error('Unexpected error during render:', error)
-      try {
-        pool.removeBadObject(renderer)
-      } catch (e) {
-        console.error('Error removing renderer after error:', e)
-      }
+      discardRenderer('render call threw')
       if (!res.headersSent) {
         if (metricsModule) {
           metricsModule.tileErrorsTotal.inc({ type: 'rendered', name: id })
@@ -1377,6 +1392,234 @@ export const serve_rendered = {
     const globalSparse = options.sparse ?? true
 
     /**
+     * Answers one resource request from a renderer: sprites, glyphs, local tiles, remote URLs and files.
+     * A throw is answered by the wrapper in createRenderer, which turns it into an error callback.
+     * @param {object} req The mlgl request, carrying the resource url.
+     * @param {(err?: Error|null, response?: object|null) => void} callback The mlgl callback.
+     * @returns {Promise<void>}
+     */
+    const handleRendererRequest = async (req, callback) => {
+      const protocol = req.url.split(':')[0]
+      if (verbose >= 3) {
+        console.log('Handling request:', req)
+      }
+      if (protocol === 'sprites') {
+        // eslint-disable-next-line security/detect-object-injection -- protocol is 'sprites', validated above
+        const dir = options.paths[protocol]
+        const file = decodeURIComponent(req.url).substring(
+          protocol.length + 3
+        )
+        readFile(path.join(dir, file)).then((data) => {
+          callback(null, { data: data })
+        }).catch((err) => {
+          callback(err, null)
+        })
+      } else if (protocol === 'fonts') {
+        const parts = req.url.split('/')
+        const fontstack = decodeURIComponent(parts[2])
+        const range = parts[3].split('.')[0]
+
+        try {
+          const concatenated = await getFontsPbf(
+            null,
+            // eslint-disable-next-line security/detect-object-injection -- protocol is 'fonts', validated above
+            options.paths[protocol],
+            fontstack,
+            range,
+            existingFonts
+          )
+          callback(null, { data: concatenated })
+        } catch (err) {
+          callback(err, { data: null })
+        }
+      } else if (protocol === 'mbtiles' || protocol === 'pmtiles') {
+        const parts = req.url.split('/')
+        const sourceId = parts[2]
+        // eslint-disable-next-line security/detect-object-injection -- sourceId from internal style source names
+        const source = map.sources[sourceId]
+        // eslint-disable-next-line security/detect-object-injection -- sourceId from internal style source names
+        const sourceType = map.sourceTypes[sourceId]
+        // eslint-disable-next-line security/detect-object-injection -- sourceId from internal style source names
+        const sourceInfo = styleJSON.sources[sourceId]
+
+        const z = parts[3] | 0
+        const x = parts[4] | 0
+        const y = parts[5].split('.')[0] | 0
+        const format = parts[5].split('.')[1]
+
+        const fetchTile = await fetchTileData(
+          source,
+          sourceType,
+          z,
+          x,
+          y
+        )
+        if (fetchTile == null) {
+          if (verbose >= 2) {
+            console.log('fetchTile null on %s', req.url)
+          }
+          // eslint-disable-next-line security/detect-object-injection -- sourceId from internal style source names
+          const sparse = map.sparseFlags[sourceId] ?? true
+          // sparse=true (default) -> return empty callback so MapLibre can overzoom
+          if (sparse) {
+            callback()
+            return
+          }
+          // sparse=false -> 204 (empty tile, no overzoom) - create blank response
+          createEmptyResponse(
+            sourceInfo.format,
+            sourceInfo.color,
+            callback
+          )
+          return
+        }
+
+        const response = {}
+        response.data = fetchTile.data
+        let headers = fetchTile.headers
+
+        if (headers['Last-Modified']) {
+          response.modified = new Date(headers['Last-Modified'])
+        }
+
+        if (format === 'pbf') {
+          let isGzipped =
+            response.data.slice(0, 2).indexOf(Buffer.from([0x1f, 0x8b])) === 0
+          if (isGzipped) {
+            response.data = await gunzipP(response.data)
+          }
+          if (options.dataDecoratorFunc) {
+            response.data = options.dataDecoratorFunc(
+              sourceId,
+              'data',
+              response.data,
+              z,
+              x,
+              y
+            )
+          }
+        }
+
+        callback(null, response)
+      } else if (protocol === 'http' || protocol === 'https') {
+        const controller = new AbortController()
+        const timeoutMs = (fetchTimeout && Number(fetchTimeout)) || 15000
+        let timeoutId
+
+        try {
+          timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+          const response = await fetch(req.url, {
+            signal: controller.signal
+          })
+          clearTimeout(timeoutId)
+
+          // HTTP 204 No Content means "empty tile" - generate a blank tile
+          if (response.status === 204) {
+            const parts = url.parse(req.url)
+            const extension = path.extname(parts.pathname).toLowerCase()
+            // eslint-disable-next-line security/detect-object-injection -- extension is from path.extname, limited set
+            const format = extensionToFormat[extension] || ''
+            createEmptyResponse(format, '', callback)
+            return
+          }
+
+          if (!response.ok) {
+            if (verbose >= 2) {
+              console.log(
+                'fetchTile HTTP %d on %s, %s',
+                response.status,
+                req.url,
+                globalSparse
+                  ? 'allowing overzoom'
+                  : 'creating empty tile'
+              )
+            }
+
+            if (globalSparse) {
+              // sparse=true -> allow overzoom
+              callback()
+              return
+            }
+
+            // sparse=false (default) -> create empty tile
+            const parts = url.parse(req.url)
+            const extension = path.extname(parts.pathname).toLowerCase()
+            // eslint-disable-next-line security/detect-object-injection -- extension is from path.extname, limited set
+            const format = extensionToFormat[extension] || ''
+            createEmptyResponse(format, '', callback)
+            return
+          }
+
+          const responseHeaders = response.headers
+          const responseData = await response.arrayBuffer()
+          const parsedResponse = {}
+
+          if (responseHeaders.get('last-modified')) {
+            parsedResponse.modified = new Date(responseHeaders.get('last-modified'))
+          }
+          if (responseHeaders.get('expires')) {
+            parsedResponse.expires = new Date(responseHeaders.get('expires'))
+          }
+          if (responseHeaders.get('etag')) {
+            parsedResponse.etag = responseHeaders.get('etag')
+          }
+
+          parsedResponse.data = Buffer.from(responseData)
+          callback(null, parsedResponse)
+        } catch (error) {
+          // Log DNS failures
+          if (error.cause?.code === 'ENOTFOUND') {
+            console.error(
+              `DNS RESOLUTION FAILED for ${req.url}. ` +
+              `This domain may be unreachable or misconfigured in your style. ` +
+              `Consider removing it or fixing the DNS.`
+            )
+          }
+
+          // Log timeout
+          if (error.name === 'AbortError') {
+            console.error(`FETCH TIMEOUT for ${req.url}. The request took longer than ${timeoutMs} ms to complete.`)
+          }
+
+          // Log all other errors
+          console.error(`Error fetching remote URL ${req.url}:`, error.message || error)
+
+          if (globalSparse) {
+            // sparse=true -> allow overzoom
+            callback()
+            return
+          }
+
+          // sparse=false (default) -> create empty tile
+          const parts = url.parse(req.url)
+          const extension = path.extname(parts.pathname).toLowerCase()
+          // eslint-disable-next-line security/detect-object-injection -- extension is from path.extname, limited set
+          const format = extensionToFormat[extension] || ''
+          createEmptyResponse(format, '', callback)
+        }
+      } else if (protocol === 'file') {
+        const name = decodeURI(req.url).substring(protocol.length + 3)
+        const file = path.join(options.paths['files'], name)
+        if (await existsP(file)) {
+          const inputFileStats = await fsp.stat(file)
+          if (!inputFileStats.isFile() || inputFileStats.size === 0) {
+            throw Error(`File is not valid: "${req.url}" - resolved to "${file}"`)
+          }
+
+          readFile(file).then((data) => {
+            callback(null, { data: data })
+          }).catch((err) => {
+            callback(err, null)
+          })
+        } else {
+          throw Error(`File does not exist: "${req.url}" - resolved to "${file}"`)
+        }
+      } else {
+        throw Error(`Unsupported protocol in request: "${req.url}"`)
+      }
+    }
+
+    /**
      * Creates a pool of renderers.
      * @param {number} ratio Pixel ratio
      * @param {string} mode Rendering mode ('tile' or 'static').
@@ -1396,221 +1639,21 @@ export const serve_rendered = {
           mode,
           ratio,
           request: async (req, callback) => {
-            const protocol = req.url.split(':')[0]
-            if (verbose >= 3) {
-              console.log('Handling request:', req)
-            }
-            if (protocol === 'sprites') {
-              // eslint-disable-next-line security/detect-object-injection -- protocol is 'sprites', validated above
-              const dir = options.paths[protocol]
-              const file = decodeURIComponent(req.url).substring(
-                protocol.length + 3
-              )
-              readFile(path.join(dir, file)).then((data) => {
-                callback(null, { data: data })
-              }).catch((err) => {
-                callback(err, null)
-              })
-            } else if (protocol === 'fonts') {
-              const parts = req.url.split('/')
-              const fontstack = decodeURIComponent(parts[2])
-              const range = parts[3].split('.')[0]
-
-              try {
-                const concatenated = await getFontsPbf(
-                  null,
-                  // eslint-disable-next-line security/detect-object-injection -- protocol is 'fonts', validated above
-                  options.paths[protocol],
-                  fontstack,
-                  range,
-                  existingFonts
-                )
-                callback(null, { data: concatenated })
-              } catch (err) {
-                callback(err, { data: null })
-              }
-            } else if (protocol === 'mbtiles' || protocol === 'pmtiles') {
-              const parts = req.url.split('/')
-              const sourceId = parts[2]
-              // eslint-disable-next-line security/detect-object-injection -- sourceId from internal style source names
-              const source = map.sources[sourceId]
-              // eslint-disable-next-line security/detect-object-injection -- sourceId from internal style source names
-              const sourceType = map.sourceTypes[sourceId]
-              // eslint-disable-next-line security/detect-object-injection -- sourceId from internal style source names
-              const sourceInfo = styleJSON.sources[sourceId]
-
-              const z = parts[3] | 0
-              const x = parts[4] | 0
-              const y = parts[5].split('.')[0] | 0
-              const format = parts[5].split('.')[1]
-
-              const fetchTile = await fetchTileData(
-                source,
-                sourceType,
-                z,
-                x,
-                y
-              )
-              if (fetchTile == null) {
-                if (verbose >= 2) {
-                  console.log('fetchTile null on %s', req.url)
-                }
-                // eslint-disable-next-line security/detect-object-injection -- sourceId from internal style source names
-                const sparse = map.sparseFlags[sourceId] ?? true
-                // sparse=true (default) -> return empty callback so MapLibre can overzoom
-                if (sparse) {
-                  callback()
-                  return
-                }
-                // sparse=false -> 204 (empty tile, no overzoom) - create blank response
-                createEmptyResponse(
-                  sourceInfo.format,
-                  sourceInfo.color,
-                  callback
-                )
+            // MapLibre Native waits indefinitely for a resource whose callback never fires, wedging the renderer at 0% CPU until the
+            // render timeout recycles it. Guarantee exactly one call on every path, including throws and unknown protocols.
+            let settled = false
+            const respond = (err, response) => {
+              if (settled) {
                 return
               }
-
-              const response = {}
-              response.data = fetchTile.data
-              let headers = fetchTile.headers
-
-              if (headers['Last-Modified']) {
-                response.modified = new Date(headers['Last-Modified'])
-              }
-
-              if (format === 'pbf') {
-                let isGzipped =
-                  response.data.slice(0, 2).indexOf(Buffer.from([0x1f, 0x8b])) === 0
-                if (isGzipped) {
-                  response.data = await gunzipP(response.data)
-                }
-                if (options.dataDecoratorFunc) {
-                  response.data = options.dataDecoratorFunc(
-                    sourceId,
-                    'data',
-                    response.data,
-                    z,
-                    x,
-                    y
-                  )
-                }
-              }
-
-              callback(null, response)
-            } else if (protocol === 'http' || protocol === 'https') {
-              const controller = new AbortController()
-              const timeoutMs = (fetchTimeout && Number(fetchTimeout)) || 15000
-              let timeoutId
-
-              try {
-                timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-                const response = await fetch(req.url, {
-                  signal: controller.signal
-                })
-                clearTimeout(timeoutId)
-
-                // HTTP 204 No Content means "empty tile" - generate a blank tile
-                if (response.status === 204) {
-                  const parts = url.parse(req.url)
-                  const extension = path.extname(parts.pathname).toLowerCase()
-                  // eslint-disable-next-line security/detect-object-injection -- extension is from path.extname, limited set
-                  const format = extensionToFormat[extension] || ''
-                  createEmptyResponse(format, '', callback)
-                  return
-                }
-
-                if (!response.ok) {
-                  if (verbose >= 2) {
-                    console.log(
-                      'fetchTile HTTP %d on %s, %s',
-                      response.status,
-                      req.url,
-                      globalSparse
-                        ? 'allowing overzoom'
-                        : 'creating empty tile'
-                    )
-                  }
-
-                  if (globalSparse) {
-                    // sparse=true -> allow overzoom
-                    callback()
-                    return
-                  }
-
-                  // sparse=false (default) -> create empty tile
-                  const parts = url.parse(req.url)
-                  const extension = path.extname(parts.pathname).toLowerCase()
-                  // eslint-disable-next-line security/detect-object-injection -- extension is from path.extname, limited set
-                  const format = extensionToFormat[extension] || ''
-                  createEmptyResponse(format, '', callback)
-                  return
-                }
-
-                const responseHeaders = response.headers
-                const responseData = await response.arrayBuffer()
-                const parsedResponse = {}
-
-                if (responseHeaders.get('last-modified')) {
-                  parsedResponse.modified = new Date(responseHeaders.get('last-modified'))
-                }
-                if (responseHeaders.get('expires')) {
-                  parsedResponse.expires = new Date(responseHeaders.get('expires'))
-                }
-                if (responseHeaders.get('etag')) {
-                  parsedResponse.etag = responseHeaders.get('etag')
-                }
-
-                parsedResponse.data = Buffer.from(responseData)
-                callback(null, parsedResponse)
-              } catch (error) {
-                // Log DNS failures
-                if (error.cause?.code === 'ENOTFOUND') {
-                  console.error(
-                    `DNS RESOLUTION FAILED for ${req.url}. ` +
-                    `This domain may be unreachable or misconfigured in your style. ` +
-                    `Consider removing it or fixing the DNS.`
-                  )
-                }
-
-                // Log timeout
-                if (error.name === 'AbortError') {
-                  console.error(`FETCH TIMEOUT for ${req.url}. The request took longer than ${timeoutMs} ms to complete.`)
-                }
-
-                // Log all other errors
-                console.error(`Error fetching remote URL ${req.url}:`, error.message || error)
-
-                if (globalSparse) {
-                  // sparse=true -> allow overzoom
-                  callback()
-                  return
-                }
-
-                // sparse=false (default) -> create empty tile
-                const parts = url.parse(req.url)
-                const extension = path.extname(parts.pathname).toLowerCase()
-                // eslint-disable-next-line security/detect-object-injection -- extension is from path.extname, limited set
-                const format = extensionToFormat[extension] || ''
-                createEmptyResponse(format, '', callback)
-              }
-            } else if (protocol === 'file') {
-              const name = decodeURI(req.url).substring(protocol.length + 3)
-              const file = path.join(options.paths['files'], name)
-              if (await existsP(file)) {
-                const inputFileStats = await fsp.stat(file)
-                if (!inputFileStats.isFile() || inputFileStats.size === 0) {
-                  throw Error(`File is not valid: "${req.url}" - resolved to "${file}"`)
-                }
-
-                readFile(file).then((data) => {
-                  callback(null, { data: data })
-                }).catch((err) => {
-                  callback(err, null)
-                })
-              } else {
-                throw Error(`File does not exist: "${req.url}" - resolved to "${file}"`)
-              }
+              settled = true
+              callback(err, response)
+            }
+            try {
+              await handleRendererRequest(req, respond)
+            } catch (err) {
+              console.error(`Error handling renderer request for ${req.url}:`, err)
+              respond(err, null)
             }
           }
         })

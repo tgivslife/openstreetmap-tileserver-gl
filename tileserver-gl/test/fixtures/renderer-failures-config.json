@@ -1,0 +1,27 @@
+{
+  "options": {
+    "paths": {
+      "root": "renderer-failures",
+      "fonts": "../../../test_data/fonts",
+      "styles": "."
+    },
+    "minRendererPoolSizes": [
+      1
+    ],
+    "maxRendererPoolSizes": [
+      1
+    ]
+  },
+  "styles": {
+    "missing-file": {
+      "style": "missing-file/style.json"
+    },
+    "unknown-protocol": {
+      "style": "unknown-protocol/style.json"
+    },
+    "ok": {
+      "style": "ok/style.json"
+    }
+  },
+  "data": {}
+}
