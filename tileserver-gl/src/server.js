@@ -28,7 +28,7 @@ import {
   setHostDerivedCacheControl
 } from './utils.js'
 
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 
 const mercator = new SphericalMercator()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -347,7 +347,9 @@ async function start (opts) {
     try {
       const dataDecoratorPath = path.resolve(paths.root, options.dataDecorator)
 
-      const module = await import(dataDecoratorPath)
+      // import() needs a file:// URL, not a bare path: on Windows an absolute path starts with a drive letter, which the ESM loader
+      // rejects as an unknown URL scheme, so the decorator silently never loaded there.
+      const module = await import(pathToFileURL(dataDecoratorPath).href)
       options.dataDecoratorFunc = module.default
     } catch (e) {
       console.error(`Error loading data decorator: ${e}`)
