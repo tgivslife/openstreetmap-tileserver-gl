@@ -282,6 +282,24 @@
                     attribution: tile_attribution
                 }).addTo(map);
             }
+
+            // With no position in the URL, open on the style's area; otherwise the map has no view and shows nothing. A position
+            // in the URL is applied by L.Hash instead.
+            // Bounds narrower than the world are fitted directly. Otherwise use the center: when the style sets it, its zoom counts
+            // 512px tiles and this view counts 256px ones (512px tiles at zoomOffset -1), hence the +1. A center computed from
+            // bounds counts 256px tiles, which is why bounds are preferred whenever they say more than "the whole world".
+            if (!location.hash) {
+                var bounds = jsonResponse.bounds;
+                var center = jsonResponse.center;
+                var wholeWorld = Array.isArray(bounds) && bounds[2] - bounds[0] >= 359;
+                if (Array.isArray(bounds) && bounds.length === 4 && !wholeWorld) {
+                    map.fitBounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]]);
+                } else if (Array.isArray(center) && center.length >= 2) {
+                    map.setView([center[1], center[0]], Math.max(1, Math.round((center[2] || 0) + 1)));
+                } else {
+                    map.setView([0, 0], 1);
+                }
+            }
         };
         req.send(null);
       
