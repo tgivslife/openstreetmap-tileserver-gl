@@ -8,3 +8,16 @@ plugins
 config.json
 *.mbtiles
 styles
+
+# Viewer assets built or copied into public/resources by `npm run prepare`
+/public/resources/maplibre-gl.js
+/public/resources/maplibre-gl.js.map
+/public/resources/maplibre-gl.css
+/public/resources/maplibre-gl.css.map
+/public/resources/maplibre-gl-worker.js
+/public/resources/maplibre-gl-worker.js.map
+/public/resources/leaflet.js
+/public/resources/leaflet.js.map
+/public/resources/leaflet.css
+/public/resources/leaflet-hash.js
+/public/resources/elevation-control.js
