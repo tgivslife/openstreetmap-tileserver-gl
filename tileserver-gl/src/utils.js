@@ -823,6 +823,27 @@ export function getCacheControl (options, category) {
 }
 
 /**
+ * Whether a conditional request can be answered 304 from Last-Modified alone, before the body (and so its ETag) is built.
+ * If-None-Match takes precedence over If-Modified-Since (RFC 9110 §13.2.3), so when it is present this answers false and the
+ * route builds the response, letting Express compare the ETag. Answer a true result with res.status(304).end(), not
+ * sendStatus(304): that sends a "Not Modified" body whose ETag would replace the resource's in the client's cache.
+ * @param {object} req - Express request object.
+ * @param {string} lastModified - The resource's Last-Modified value.
+ * @returns {boolean} - True when the request can be answered 304 without building the body.
+ */
+export function isNotModifiedSince (req, lastModified) {
+  const modifiedSince = req.get('if-modified-since')
+  if (!modifiedSince || req.get('if-none-match')) {
+    return false
+  }
+  const cc = req.get('cache-control')
+  if (cc && cc.indexOf('no-cache') !== -1) {
+    return false
+  }
+  return new Date(lastModified).getTime() === new Date(modifiedSince).getTime()
+}
+
+/**
  * Caps a Cache-Control value to the lifetime left on the expiring token that authorised the request.
  * A cache keys on the token URL, so freshness beyond the token's expiry would let a shared cache keep answering a URL the
  * origin already rejects. max-age and s-maxage are cut to the seconds left, including a quoted value such as

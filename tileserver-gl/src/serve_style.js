@@ -11,6 +11,7 @@ import {
   allowedSpriteScales,
   fixUrl,
   getPublicUrl,
+  isNotModifiedSince,
   isValidHttpUrl,
   readFile,
   setCacheControl,
@@ -206,18 +207,11 @@ export const serve_style = {
           return res.status(400).send('Bad Sprite ID or Scale')
         }
 
-        const modifiedSince = req.get('if-modified-since')
-        const cc = req.get('cache-control')
-        if (modifiedSince && (!cc || cc.indexOf('no-cache') === -1)) {
-          if (
-            new Date(item.lastModified).getTime() ===
-            new Date(modifiedSince).getTime()
-          ) {
-            // A cache that gets this 304 keeps its stored copy but restarts its freshness from the headers sent here, so send the
-            // Cache-Control a 200 would; without one it would reuse the stored one, which may allow longer than this request should.
-            setCacheControl(res, options, 'asset')
-            return res.sendStatus(304)
-          }
+        if (isNotModifiedSince(req, item.lastModified)) {
+          // A cache that gets this 304 keeps its stored copy but restarts its freshness from the headers sent here, so send the
+          // Cache-Control a 200 would; without one it would reuse the stored one, which may allow longer than this request should.
+          setCacheControl(res, options, 'asset')
+          return res.status(304).end()
         }
 
         const sanitizedSpritePath = sprite.path.replace(/^(\.\.\/)+/, '')

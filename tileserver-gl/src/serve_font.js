@@ -2,7 +2,7 @@
 
 import express from 'express'
 
-import { getFontsPbf, listFonts, setCacheControl } from './utils.js'
+import { getFontsPbf, isNotModifiedSince, listFonts, setCacheControl } from './utils.js'
 
 let metricsModule = null
 
@@ -54,17 +54,11 @@ export async function serve_font (options, allowedFonts, programOpts) {
       console.log(`Handling font request for: /fonts/%s/%s.pbf`, sFontStack, sRange)
     }
 
-    const modifiedSince = req.get('if-modified-since')
-    const cc = req.get('cache-control')
-    if (modifiedSince && (!cc || cc.indexOf('no-cache') === -1)) {
-      if (
-        new Date(lastModified).getTime() === new Date(modifiedSince).getTime()
-      ) {
-        // A cache that gets this 304 keeps its stored copy but restarts its freshness from the headers sent here, so send the
-        // Cache-Control a 200 would; without one it would reuse the stored one, which may allow longer than this request should.
-        setCacheControl(res, options, 'asset')
-        return res.sendStatus(304)
-      }
+    if (isNotModifiedSince(req, lastModified)) {
+      // A cache that gets this 304 keeps its stored copy but restarts its freshness from the headers sent here, so send the
+      // Cache-Control a 200 would; without one it would reuse the stored one, which may allow longer than this request should.
+      setCacheControl(res, options, 'asset')
+      return res.status(304).end()
     }
 
     // Glyph PBFs only cover the Basic Multilingual Plane: codepoints 0-65535, in 256-wide blocks.
