@@ -278,6 +278,15 @@ class S3Source {
   }
 
   /**
+   * Destroys the S3 client, closing its keep-alive sockets. Called by clearPMtilesCache on reload, once the old server has
+   * finished its requests; without it every reload left the previous client's connection pool open.
+   * @returns {void}
+   */
+  close () {
+    this.s3Client.destroy()
+  }
+
+  /**
    * Fetches a byte range from the S3 object.
    * @param {number} offset - The starting byte offset.
    * @param {number} length - The number of bytes to fetch.
@@ -531,7 +540,7 @@ export function openPMtiles (
 }
 
 /**
- * Clears the PMTiles cache and closes any local file descriptors owned by cached sources.
+ * Clears the PMTiles cache and closes what cached sources own: local file descriptors and S3 clients with their sockets.
  * @returns {void}
  */
 export function clearPMtilesCache () {
