@@ -97,7 +97,12 @@ export async function serve_font (options, allowedFonts, programOpts) {
       res.header('Last-Modified', lastModified)
       setCacheControl(res, options, 'asset')
       if (metricsModule) {
-        metricsModule.tilesServedTotal.inc({ type: 'font', name: sFontStack })
+        // Labeled by the stack's first font when it is a known font, else "other". The stack comes from the URL and, with
+        // serveAllFonts, any name succeeds through fallback, so labeling the raw stack added a metric series per made-up name.
+        const primaryFont = sFontStack.split(',')[0].trim()
+        const knownFonts = options.serveAllFonts ? existingFonts : allowedFonts
+        const name = Object.hasOwn(knownFonts, primaryFont) ? primaryFont : 'other'
+        metricsModule.tilesServedTotal.inc({ type: 'font', name })
       }
       return res.send(concatenated)
     } catch (err) {
