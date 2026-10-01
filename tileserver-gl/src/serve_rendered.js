@@ -82,6 +82,26 @@ const MAX_CONSECUTIVE_RENDER_FAILURES = 3
 // its own that carries only the message, so this is how the render callback learns the storage failed and which status to answer.
 const rendererSourceErrors = new WeakMap()
 
+/**
+ * Sums a style's renderer pools: renderers held, renderers rendering, and requests queued for one.
+ * advanced-pool has no public counters, so this reads its private state (allObjects, freeObjects, queue).
+ * @param {object} map The style's map entry, with renderers and renderersStatic pool arrays.
+ * @returns {{total: number, active: number, waiting: number}} The summed counts.
+ */
+export function rendererPoolCounts (map) {
+  const counts = { total: 0, active: 0, waiting: 0 }
+  for (const pool of [...(map.renderers || []), ...(map.renderersStatic || [])]) {
+    const priv = pool?.priv
+    if (!priv) {
+      continue
+    }
+    counts.total += priv.allObjects.length
+    counts.active += priv.allObjects.length - priv.freeObjects.length
+    counts.waiting += priv.queue.size()
+  }
+  return counts
+}
+
 mlgl.on('message', (e) => {
   if (e.severity === 'WARNING' || e.severity === 'ERROR') {
     console.log('mlgl:', e)
@@ -2060,22 +2080,15 @@ export const serve_rendered = {
 
     if (metricsModule) {
       map._metricsInterval = setInterval(() => {
-        [map.renderers, map.renderersStatic].forEach((poolArr) => {
-          poolArr.forEach((pool) => {
-            if (!pool) {
-              return
-            }
-            try {
-              const total = pool.size ?? 0
-              const available = pool.available ?? 0
-              metricsModule.renderPoolSize.set({ name: id }, total)
-              metricsModule.renderPoolActive.set({ name: id }, total - available)
-              metricsModule.renderPoolWaiting.set({ name: id }, pool.pending ?? 0)
-            } catch (_) {
-              /* pool may be mid-teardown */
-            }
-          })
-        })
+        try {
+          // One sample per style, summed over every scale and mode; setting one per pool overwrote the same series.
+          const { total, active, waiting } = rendererPoolCounts(map)
+          metricsModule.renderPoolSize.set({ name: id }, total)
+          metricsModule.renderPoolActive.set({ name: id }, active)
+          metricsModule.renderPoolWaiting.set({ name: id }, waiting)
+        } catch (_) {
+          /* pool may be mid-teardown */
+        }
       }, 5000)
     }
   },
