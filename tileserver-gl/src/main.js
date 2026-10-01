@@ -163,24 +163,7 @@ const startServer = (configPath, config) => {
   if (publicUrl && publicUrl.lastIndexOf('/') !== publicUrl.length - 1) {
     publicUrl += '/'
   }
-  // Determine allowedHosts: config > env > default '*'
-  let allowedHosts = '*'
-  if (
-    config &&
-    config.options &&
-    typeof config.options.allowedHosts !== 'undefined'
-  ) {
-    allowedHosts = String(config.options.allowedHosts).trim()
-  } else if (process.env.TILESERVER_GL_ALLOWED_HOSTS) {
-    allowedHosts = String(process.env.TILESERVER_GL_ALLOWED_HOSTS).trim()
-  }
-  // Log warning if insecure defaults
-  if ((allowedHosts === '*' || allowedHosts === '' || typeof allowedHosts === 'undefined')
-    && !publicUrl) {
-    console.warn('[SECURITY WARNING] Host header poisoning mitigation is NOT enabled.')
-    console.warn('  Response URLs may be built from untrusted Host/X-Forwarded-* headers.')
-    console.warn('  For production, set --public_url / PUBLIC_URL, allowedHosts in config, or TILESERVER_GL_ALLOWED_HOSTS env.')
-  }
+  // allowedHosts is resolved by server(), once the config file is read: only there is options.allowedHosts known for a --config start.
   return server({
     configPath,
     config,
@@ -193,7 +176,6 @@ const startServer = (configPath, config) => {
     logFormat: opts.log_format,
     fetchTimeout: opts.fetchTimeout,
     publicUrl,
-    allowedHosts,
     ignoreMissingFiles: opts.ignoreMissingFiles,
     metrics: opts.metrics || process.env.TILESERVER_GL_METRICS === 'true',
     metricsPort: (() => {

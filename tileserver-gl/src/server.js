@@ -25,6 +25,7 @@ import {
   getTileUrls,
   isValidHttpUrl,
   isValidRemoteUrl,
+  parseAllowedHosts,
   redactKeyInUrl,
   setCacheControl,
   setHostDerivedCacheControl
@@ -290,6 +291,19 @@ async function start (opts) {
   if (!config) {
     console.log('ERROR: No config file not specified!')
     process.exit(1)
+  }
+
+  // Resolved here, once the config file is read: main.js only holds the config itself for generated configs, so a --config start
+  // used to ignore options.allowedHosts. Precedence: options.allowedHosts > the caller's allowedHosts > TILESERVER_GL_ALLOWED_HOSTS > '*'.
+  // A copy, not a mutation: reload() passes the caller's opts back in, and a value from the previous config must not outlive it.
+  opts = {
+    ...opts,
+    allowedHosts: config.options?.allowedHosts ?? opts.allowedHosts ?? process.env.TILESERVER_GL_ALLOWED_HOSTS ?? '*'
+  }
+  if (parseAllowedHosts(opts.allowedHosts) === '*' && !opts.publicUrl) {
+    console.warn('[SECURITY WARNING] Host header poisoning mitigation is NOT enabled.')
+    console.warn('  Response URLs may be built from untrusted Host/X-Forwarded-* headers.')
+    console.warn('  For production, set --public_url / PUBLIC_URL, allowedHosts in config, or TILESERVER_GL_ALLOWED_HOSTS env.')
   }
 
   const options = config.options || {}
