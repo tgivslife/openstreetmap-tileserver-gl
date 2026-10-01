@@ -34,6 +34,36 @@ function boolEnv (name, def) {
 }
 
 /**
+ * Settles with a promise, or rejects with an AbortError as soon as the signal aborts, whichever comes first.
+ * The promise is left running on abort (the signal is what cancels its work), and a later rejection from it is swallowed.
+ * @param {Promise} promise - The operation to wait for.
+ * @param {AbortSignal} [signal] - Signal that ends the wait early.
+ * @returns {Promise} - The operation's result.
+ */
+function untilAborted (promise, signal) {
+  if (!signal) return promise
+  return new Promise((resolve, reject) => {
+    // An Error named AbortError, as the AWS SDK rejects with, rather than the signal's DOMException reason.
+    const onAbort = () => reject(Object.assign(new Error('Request aborted', { cause: signal.reason }), { name: 'AbortError' }))
+    if (signal.aborted) {
+      onAbort()
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true })
+    }
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      }
+    )
+  })
+}
+
+/**
  * S3 Source for PMTiles
  * Supports:
  * - AWS S3: s3://bucket-name/path/to/file.pmtiles
@@ -82,6 +112,11 @@ class S3Source {
         ? 'url'
         : 'default'} = ${this.requestPayer}`)
     }
+
+    // A deadline for each whole range read, enforced in getBytes rather than by the request handler: the handler's
+    // requestTimeout only logs a warning (unless throwOnRequestTimeout) and stops at the response headers, so a
+    // stalled endpoint or body would leave the tile request pending for good.
+    this.requestTimeout = intEnv('TILESERVER_GL_S3_REQUEST_TIMEOUT_MS', 5000, 0)
 
     this.s3Client = this.createS3Client(parsed.endpoint, this.region, profile, this.verbose)
   }
@@ -199,12 +234,11 @@ class S3Source {
       5000,
       0
     )
-    const requestTimeout = intEnv('TILESERVER_GL_S3_REQUEST_TIMEOUT_MS', 5000, 0)
 
     if (verbose >= 2) {
       console.log(
         `S3 client pool: maxSockets=${maxSockets} keepAlive=${keepAlive} ` +
-        `connectionTimeout=${connectionTimeout}ms requestTimeout=${requestTimeout}ms`
+        `connectionTimeout=${connectionTimeout}ms requestTimeout=${this.requestTimeout}ms`
       )
     }
 
@@ -212,7 +246,6 @@ class S3Source {
       region: region,
       requestHandler: {
         connectionTimeout,
-        requestTimeout,
         httpAgent: new http.Agent({ keepAlive, maxSockets }),
         httpsAgent: new https.Agent({ keepAlive, maxSockets })
       },
@@ -255,6 +288,10 @@ class S3Source {
    * @throws {Error} - Throws on S3 errors like NoSuchKey, AccessDenied, NoSuchBucket.
    */
   async getBytes (offset, length, signal, etag) {
+    // Covers connect, headers, SDK retries and the body read alike; aborting also destroys a body mid-stream.
+    const deadline = this.requestTimeout ? AbortSignal.timeout(this.requestTimeout) : undefined
+    const abortSignal = signal && deadline ? AbortSignal.any([signal, deadline]) : signal ?? deadline
+
     try {
       const commandParams = {
         Bucket: this.bucket,
@@ -269,11 +306,15 @@ class S3Source {
 
       const command = new GetObjectCommand(commandParams)
 
-      const response = await this.s3Client.send(command, {
-        abortSignal: signal
-      })
-
-      const arr = await response.Body.transformToByteArray()
+      // The signal cancels the network activity, but not the SDK's retry backoff (a Retry-After can outlast the deadline),
+      // so the whole send and body read is also raced against it.
+      const { response, arr } = await untilAborted(
+        (async () => {
+          const response = await this.s3Client.send(command, { abortSignal })
+          return { response, arr: await response.Body.transformToByteArray() }
+        })(),
+        abortSignal
+      )
 
       if (!arr) {
         throw new Error('Failed to read S3 response body')
@@ -288,6 +329,13 @@ class S3Source {
         cacheControl: response.CacheControl
       }
     } catch (error) {
+      if (deadline?.aborted && !signal?.aborted) {
+        throw Object.assign(
+          new Error(`S3 read of ${this.bucket}/${this.key} timed out after ${this.requestTimeout}ms`, { cause: error }),
+          { name: 'TimeoutError' }
+        )
+      }
+
       // Handle AWS SDK errors
       if (error.name === 'PreconditionFailed') {
         throw new EtagMismatch()
