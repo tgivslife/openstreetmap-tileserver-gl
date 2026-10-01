@@ -2140,6 +2140,10 @@ export const serve_rendered = {
             return
           }
 
+          // As in remove(): a running gauge timer would keep this generation's maps and pools alive after a SIGHUP reload.
+          if (item.map._metricsInterval) {
+            clearInterval(item.map._metricsInterval)
+          }
           await Promise.all(
             Object.keys(item.map.sources || {}).map(async (sourceId) => {
               // eslint-disable-next-line security/detect-object-injection -- sourceId is from Object.keys() iteration
