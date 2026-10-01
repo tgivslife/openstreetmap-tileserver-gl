@@ -24,6 +24,7 @@ import {
   getTileUrls,
   isValidHttpUrl,
   isValidRemoteUrl,
+  redactKeyInUrl,
   setCacheControl,
   setHostDerivedCacheControl
 } from './utils.js'
@@ -92,14 +93,13 @@ async function start (opts) {
   // Captured so reload() can close it; otherwise each restart opens a new file descriptor for --log_file and leaks the previous one.
   let accessLogStream = null
   if (process.env.NODE_ENV !== 'test') {
-    // Redact ?key= / &key= from the logged URL so API keys and tokens, which travel in the query string, are not written to the access log.
-    // Overriding the built-in :url token covers every format (tiny/dev/combined/custom).
-    morgan.token('url', (req) =>
-      (req.originalUrl || req.url).replace(
-        /([?&]key=)[^&]*/gi,
-        '$1[REDACTED]'
-      )
-    )
+    // Redact the key from the logged URL and Referer so API keys and tokens, which travel in the query string, are not written to the access log.
+    // The Referer of a viewer's own requests is the viewer URL, key included. Overriding the built-in tokens covers every format.
+    morgan.token('url', (req) => redactKeyInUrl(req.originalUrl || req.url))
+    morgan.token('referrer', (req) => {
+      const referrer = req.headers.referer || req.headers.referrer
+      return referrer ? redactKeyInUrl(referrer) : undefined
+    })
     const defaultLogFormat = process.env.NODE_ENV === 'production' ? 'tiny' : 'dev'
     const logFormat = opts.logFormat || defaultLogFormat
     if (opts.logFile) {
@@ -911,6 +911,9 @@ async function start (opts) {
             }
             // Viewer markup is not versioned, so it must not be cached or a redeploy would keep serving the old page.
             setCacheControl(res, options, 'html')
+            // The page URL carries ?key=, and browsers send the full URL as the Referer of same-origin requests by default.
+            // strict-origin sends only the origin, which is all the allowedOrigins check reads.
+            res.set('Referrer-Policy', 'strict-origin')
             return res.status(200).send(compiled(data))
           } else {
             if (opts.verbose >= 1) {

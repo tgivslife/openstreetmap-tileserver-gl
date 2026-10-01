@@ -3,6 +3,7 @@
 import path from 'path'
 import fsPromises from 'fs/promises'
 import fs from 'node:fs'
+import querystring from 'node:querystring'
 import clone from 'clone'
 import { combine } from '@jsse/pbfont'
 import { existsP } from './promises.js'
@@ -751,6 +752,29 @@ export function parseOptionalBoolean (value) {
  */
 export function resolveSparse ({ perSource, globalOption, metadata, isVector }) {
   return perSource ?? globalOption ?? metadata ?? !isVector
+}
+
+/**
+ * Replaces the value of every `key` query parameter in a URL with [REDACTED], for logging.
+ * Names are decoded the way Express's query parser (node:querystring) decodes them before the key gate reads req.query.key,
+ * so an encoded name such as `k%65y` is caught too; matching the raw text `key=` missed it.
+ * @param {string} url - A request URL or path, or a Referer.
+ * @returns {string} - The URL with key values redacted.
+ */
+export function redactKeyInUrl (url) {
+  const queryStart = url.indexOf('?')
+  if (queryStart === -1) {
+    return url
+  }
+  const hashStart = url.indexOf('#', queryStart)
+  const queryEnd = hashStart === -1 ? url.length : hashStart
+  const pairs = url.slice(queryStart + 1, queryEnd).split('&').map((pair) => {
+    const eq = pair.indexOf('=')
+    const rawName = eq === -1 ? pair : pair.slice(0, eq)
+    const name = querystring.unescape(rawName.replace(/\+/g, ' '))
+    return name.toLowerCase() === 'key' ? `${rawName}=[REDACTED]` : pair
+  })
+  return url.slice(0, queryStart + 1) + pairs.join('&') + url.slice(queryEnd)
 }
 
 /**
