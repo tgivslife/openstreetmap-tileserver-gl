@@ -213,6 +213,9 @@ export const serve_style = {
             new Date(item.lastModified).getTime() ===
             new Date(modifiedSince).getTime()
           ) {
+            // A cache that gets this 304 keeps its stored copy but restarts its freshness from the headers sent here, so send the
+            // Cache-Control a 200 would; without one it would reuse the stored one, which may allow longer than this request should.
+            setCacheControl(res, options, 'asset')
             return res.sendStatus(304)
           }
         }

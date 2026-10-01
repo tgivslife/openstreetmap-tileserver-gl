@@ -19,6 +19,7 @@ import { serve_font } from './serve_font.js'
 import { clearPMtilesCache } from './pmtiles_adapter.js'
 import {
   allowedTileSizes,
+  capCacheControlToKeyExpiry,
   getCacheControl,
   getPublicUrl,
   getTileUrls,
@@ -197,10 +198,14 @@ async function start (opts) {
         return next()
       }
       const candidate = typeof req.query.key === 'string' ? req.query.key : ''
-      const keyOk = (candidate !== '' && apiKeys.some((k) => equal(k, candidate))) ||
-        (tokenSecret !== '' && candidate !== '' && isValidToken(candidate))
-      if (!keyOk) {
+      const staticKeyOk = candidate !== '' && apiKeys.some((k) => equal(k, candidate))
+      const tokenOk = !staticKeyOk && tokenSecret !== '' && candidate !== '' && isValidToken(candidate)
+      if (!staticKeyOk && !tokenOk) {
         return res.status(403).send('Forbidden')
+      }
+      if (tokenOk) {
+        // Caps the response's Cache-Control to the token's remaining lifetime (capCacheControlToKeyExpiry).
+        res.locals.keyExpiresAt = Number(candidate.slice(0, candidate.indexOf('.')))
       }
       if (allowedOrigins.length) {
         // Hotlink deterrence (not auth). Use the unforgeable Origin, falling back to the Referer's origin since resource loads (<img>, CSS url()) send only Referer.
@@ -364,7 +369,7 @@ async function start (opts) {
   const staticOptions = staticCacheControl
     ? {
       setHeaders: (staticRes) =>
-        staticRes.set('Cache-Control', staticCacheControl)
+        staticRes.set('Cache-Control', capCacheControlToKeyExpiry(staticCacheControl, staticRes))
     }
     : {}
 

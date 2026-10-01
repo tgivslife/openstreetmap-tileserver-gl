@@ -823,6 +823,49 @@ export function getCacheControl (options, category) {
 }
 
 /**
+ * Caps a Cache-Control value to the lifetime left on the expiring token that authorised the request.
+ * A cache keys on the token URL, so freshness beyond the token's expiry would let a shared cache keep answering a URL the
+ * origin already rejects. max-age and s-maxage are cut to the seconds left, including a quoted value such as
+ * s-maxage="86400", which caches accept; one whose value cannot be read is replaced by the seconds left.
+ * stale-while-revalidate, stale-if-error and immutable are dropped, a value with no max-age gets one, and must-revalidate
+ * is added: without it a client sending max-stale may still be served the response once stale (RFC 9111 §4.2.4).
+ * Requests authorised by a static API key, or by none, set no expiry and are left as they are.
+ * @param {string|null} value - The Cache-Control value.
+ * @param {object} res - Express response object; the key gate stores the token's expiry, in epoch seconds, in res.locals.keyExpiresAt.
+ * @param {number} [nowSec] - Current time in epoch seconds.
+ * @returns {string|null} - The capped value.
+ */
+export function capCacheControlToKeyExpiry (value, res, nowSec = Date.now() / 1000) {
+  const expiresAt = res.locals?.keyExpiresAt
+  if (!value || expiresAt === undefined || /\bno-store\b/i.test(value)) {
+    return value
+  }
+  const remaining = Math.floor(expiresAt - nowSec)
+  if (remaining <= 0) {
+    return 'no-store'
+  }
+  const dropped = new Set(['stale-while-revalidate', 'stale-if-error', 'immutable', 'must-revalidate'])
+  const directives = []
+  for (const directive of value.split(',').map((d) => d.trim()).filter(Boolean)) {
+    const name = directive.split('=')[0].trim().toLowerCase()
+    if (dropped.has(name)) {
+      continue
+    }
+    if (name === 'max-age' || name === 's-maxage') {
+      const seconds = directive.match(/=\s*"?\s*(\d+)\s*"?\s*$/)
+      directives.push(`${name}=${seconds ? Math.min(Number(seconds[1]), remaining) : remaining}`)
+    } else {
+      directives.push(directive)
+    }
+  }
+  if (!directives.some((d) => d.startsWith('max-age=') || d.toLowerCase() === 'no-cache')) {
+    directives.push(`max-age=${remaining}`)
+  }
+  directives.push('must-revalidate')
+  return directives.join(', ')
+}
+
+/**
  * Sets the Cache-Control header for a category, unless it is suppressed.
  * @param {object} res - Express response object.
  * @param {object} options - The `options` block from the config file.
@@ -830,7 +873,7 @@ export function getCacheControl (options, category) {
  * @returns {void}
  */
 export function setCacheControl (res, options, category) {
-  const value = getCacheControl(options, category)
+  const value = capCacheControlToKeyExpiry(getCacheControl(options, category), res)
   if (value) {
     res.set('Cache-Control', value)
   }
@@ -894,6 +937,7 @@ export function setHostDerivedCacheControl (
       value = `private, ${value}`
     }
   }
+  value = capCacheControlToKeyExpiry(value, res)
   if (value) {
     res.set('Cache-Control', value)
   }
