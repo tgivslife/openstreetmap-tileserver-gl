@@ -1778,6 +1778,8 @@ export const serve_rendered = {
         renderer.load(styleJSON)
         createCallback(null, renderer)
       }
+      // Known limitation: the default queue is unbounded and untimed, so saturated requests wait indefinitely.
+      // Not fixed because the default (light S3) deployment does not ship this file; see "Known limitations" in docs/4.DEPLOYMENT.md.
       return new advancedPool.Pool({
         min,
         max,
