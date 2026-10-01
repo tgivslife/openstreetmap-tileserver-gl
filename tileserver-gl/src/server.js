@@ -5,7 +5,6 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'path'
 import fnv1a from '@sindresorhus/fnv1a'
-import chokidar from 'chokidar'
 import clone from 'clone'
 import cors from 'cors'
 import enableShutdown from 'http-shutdown'
@@ -60,7 +59,7 @@ async function start (opts) {
     data: {},
     fonts: {}
   }
-  let cleanup = async () => {}
+  const cleanup = async () => {}
 
   app.enable('trust proxy')
 
@@ -732,30 +731,6 @@ async function start (opts) {
           }
           // Fire-and-forget: addStyle now awaits serve_rendered.add internally, so a rendered-init failure here would otherwise be an unhandled rejection.
           // For dynamically discovered styles we log and continue rather than exit.
-          addStyle(id, item, false, false).catch((err) => {
-            console.error(`Error adding style "${id}":`, err && err.stack ? err.stack : err)
-          })
-        }
-      }
-    })
-
-    const watcher = chokidar.watch(path.join(options.paths.styles, '*.json'), {})
-    cleanup = async () => {
-      await watcher.close()
-    }
-    watcher.on('all', (eventType, filename) => {
-      if (filename) {
-        const id = path.basename(filename, '.json')
-        console.log(`Style "${id}" changed, updating...`)
-
-        serve_style.remove(serving.styles, id)
-        if (!isLight) {
-          serve_rendered.remove(serving.rendered, id)
-        }
-
-        if (eventType == 'add' || eventType == 'change') {
-          const item = { style: filename }
-          // Fire-and-forget (see note above): swallow rejection with a log so a failed hot-reload of one style cannot bring the whole server down.
           addStyle(id, item, false, false).catch((err) => {
             console.error(`Error adding style "${id}":`, err && err.stack ? err.stack : err)
           })

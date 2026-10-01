@@ -121,8 +121,6 @@ RUN mkdir -p /home/node/.aws && \
 ENV \
     NODE_ENV="production" \
     HOME="/home/node" \
-    CHOKIDAR_USEPOLLING=1 \
-    CHOKIDAR_INTERVAL=500 \
     LD_PRELOAD="/usr/lib/libjemalloc.so" \
     MALLOC_CONF="background_thread:true,metadata_thp:auto,dirty_decay_ms:5000,muzzy_decay_ms:5000"
 

@@ -55,7 +55,6 @@
     "@sindresorhus/fnv1a": "3.1.0",
     "advanced-pool": "0.3.3",
     "canvas": "3.2.3",
-    "chokidar": "5.0.0",
     "clone": "2.1.2",
     "color": "5.0.3",
     "commander": "15.0.0",
