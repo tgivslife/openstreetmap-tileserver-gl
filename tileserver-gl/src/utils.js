@@ -756,14 +756,16 @@ export function resolveSparse ({ perSource, globalOption, metadata, isVector }) 
 /**
  * Default Cache-Control values per response category.
  *
- * `tile` and `metadata` describe content that only changes when the archives or styles are rebuilt, so they carry a day
- * of freshness plus a week of stale-while-revalidate.
- * `asset` covers glyph ranges and sprite sheets, which are fixed for the lifetime of a deployment.
+ * `tile` describes content that only changes when the archives are rebuilt, so it carries a day of freshness plus a week
+ * of stale-while-revalidate. `metadata` (style.json, TileJSON, catalogs) gets an hour.
+ * `asset` covers glyph ranges and sprite sheets. Their URLs carry no version, so they must not be `immutable`: a redeploy that
+ * changes a sprite would otherwise be invisible for a year. They get the same hour as the style.json that references them,
+ * so a client never pairs a new style with an old sprite for longer, and revalidating is a cheap 304 on the ETag.
  * Viewer HTML is never cached, so a redeployment is picked up immediately.
  */
 const defaultCacheControl = {
   tile: 'public, max-age=86400, stale-while-revalidate=604800',
-  asset: 'public, max-age=31536000, immutable',
+  asset: 'public, max-age=3600',
   metadata: 'public, max-age=3600',
   static: 'public, max-age=86400',
   html: 'no-cache'

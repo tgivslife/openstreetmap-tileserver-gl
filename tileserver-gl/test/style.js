@@ -101,3 +101,18 @@ describe('Fonts', function () {
   testIs('/fonts/Nonsense/0-255.pbf', /./, 400);
   testIs('/fonts/Nonsense1,Nonsense2/0-255.pbf', /./, 400);
 });
+
+describe('Glyph and sprite caching', function () {
+  // Their URLs carry no version, so an immutable header would hide a redeployed sprite or font for as long as it lasts.
+  for (const url of [
+    '/fonts/Open Sans Bold/0-255.pbf',
+    '/styles/' + prefix + '/sprite.png',
+    '/styles/' + prefix + '/sprite@2x.json'
+  ]) {
+    it(url + ' is cached for an hour, not immutable', async function () {
+      const res = await supertest(app).get(url).expect(200);
+      expect(res.headers['cache-control']).to.equal('public, max-age=3600');
+      expect(res.headers['etag']).to.be.a('string');
+    });
+  }
+});
