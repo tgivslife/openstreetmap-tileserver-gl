@@ -21,8 +21,16 @@ const crypto = require('crypto');
 const secret = process.env.TILESERVER_GL_TOKEN_SECRET || 'dev-hmac-secret';
 const ttl = Number(process.argv[2] || 3600);
 
-if (!Number.isFinite(ttl) || ttl <= 0) {
-  console.error(`Invalid TTL "${process.argv[2]}" — pass a positive number of seconds.`);
+const parsedMaxTtl = parseInt(process.env.TILESERVER_GL_TOKEN_MAX_TTL || '', 10);
+const maxTtl = Number.isFinite(parsedMaxTtl) && parsedMaxTtl > 0 ? parsedMaxTtl : 604800;
+
+// Whole seconds only: a fractional expiry adds a second dot, which breaks the server's split at the first dot.
+if (!Number.isSafeInteger(ttl) || ttl <= 0) {
+  console.error(`Invalid TTL "${process.argv[2]}" — pass a positive whole number of seconds.`);
+  process.exit(1);
+}
+if (ttl > maxTtl) {
+  console.error(`TTL ${ttl}s exceeds TILESERVER_GL_TOKEN_MAX_TTL (${maxTtl}s); the server would reject the token.`);
   process.exit(1);
 }
 
