@@ -1,4 +1,5 @@
 import assert from 'assert';
+import polyline from '@mapbox/polyline';
 import { getSecureMergedParams } from '../src/serve_rendered.js';
 
 const testStatic = function (prefix, q, format, status, scale, type, query) {
@@ -306,6 +307,111 @@ describe('Static endpoints', function () {
         .set('Content-Type', 'application/json')
         .send({ data: largeString })
         .expect(413, done);
+    });
+  });
+
+  describe('overlay limits', function () {
+    const centerPath = '/styles/' + prefix + '/static/8.54,47.37,14/64x64.png';
+    const markers = (n) =>
+      Array.from({ length: n }, (_, i) => `8.54,${47.37 + i * 1e-5}|marker-icon.png`);
+    const coords = (n) =>
+      Array.from({ length: n }, (_, i) => `${8.5 + i * 1e-6},47.37`).join('|');
+
+    /**
+     * POSTs an overlay to a center-based static map.
+     * @param {object} body The JSON body.
+     * @returns {Promise<object>} The response.
+     */
+    const post = (body) =>
+      supertest(app)
+        .post(centerPath)
+        .set('Content-Type', 'application/json')
+        .send(body);
+
+    it('renders 100 markers', async function () {
+      const res = await post({ marker: markers(100) });
+      expect(res.status).to.equal(200);
+    });
+
+    it('rejects 101 markers with 400', async function () {
+      const res = await post({ marker: markers(101) });
+      expect(res.status).to.equal(400);
+      expect(res.text).to.equal('Too many markers: at most 100 allowed');
+    });
+
+    it('rejects 101 markers in the query string with 400', async function () {
+      const query = markers(101)
+        .map((m) => 'marker=' + encodeURIComponent(m))
+        .join('&');
+      const res = await supertest(app).get(centerPath + '?' + query);
+      expect(res.status).to.equal(400);
+    });
+
+    it('rejects 101 paths with 400', async function () {
+      const res = await post({ path: Array(101).fill('8.54,47.37|8.55,47.38') });
+      expect(res.status).to.equal(400);
+      expect(res.text).to.equal('Too many paths: at most 100 allowed');
+    });
+
+    it('renders a path of 20,000 coordinates', async function () {
+      const res = await post({ path: coords(20000) });
+      expect(res.status).to.equal(200);
+    });
+
+    it('rejects 20,001 coordinates across paths with 400', async function () {
+      const res = await post({ path: [coords(10000), coords(10001)] });
+      expect(res.status).to.equal(400);
+      expect(res.text).to.equal(
+        'Too many path coordinates: at most 20000 allowed'
+      );
+    });
+
+    it('counts the coordinates of an encoded path', async function () {
+      const encoded = polyline.encode(
+        Array.from({ length: 20001 }, (_, i) => [47.37, 8.5 + i * 1e-5])
+      );
+      const res = await post({ path: 'enc:' + encoded });
+      expect(res.status).to.equal(400);
+    });
+
+    describe('encoded paths are counted before decoding', function () {
+      // serve_rendered.js calls decode on this same CommonJS module object, so wrapping it here sees its calls.
+      const decode = polyline.decode;
+      let decodes;
+
+      beforeEach(function () {
+        decodes = 0;
+        polyline.decode = (...args) => {
+          decodes++;
+          return decode(...args);
+        };
+      });
+
+      afterEach(function () {
+        polyline.decode = decode;
+      });
+
+      it('rejects a 2 MB polyline of a million coordinates without decoding it', async function () {
+        const res = await post({ path: 'enc:' + '??'.repeat(1_000_000) });
+        expect(res.status).to.equal(400);
+        expect(decodes).to.equal(0);
+      });
+
+      it('rejects a polyline that exceeds what earlier paths left of the budget, without decoding it', async function () {
+        const res = await post({
+          path: [coords(19999), 'enc:' + '??'.repeat(2)]
+        });
+        expect(res.status).to.equal(400);
+        expect(decodes).to.equal(0);
+      });
+
+      it('decodes a polyline of exactly the remaining budget', async function () {
+        const res = await post({
+          path: [coords(19998), 'enc:' + '??'.repeat(2)]
+        });
+        expect(res.status).to.equal(200);
+        expect(decodes).to.equal(1);
+      });
     });
   });
 

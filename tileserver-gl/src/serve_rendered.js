@@ -274,12 +274,95 @@ function parseCoordinates (coordinatePair, query, transformer) {
 }
 
 /**
+ * A static-map request whose overlay exceeds a configured limit. Answered as a 400 with the message.
+ */
+class OverlayLimitError extends Error {
+  /**
+   * Creates an OverlayLimitError.
+   * @param {string} message - Which limit was exceeded, for the client.
+   */
+  constructor (message) {
+    super(message)
+    this.name = 'OverlayLimitError'
+  }
+}
+
+/**
+ * The overlay limits for static maps, from config or the defaults.
+ * Overlay work runs before a renderer is acquired, so it is bounded here instead: at the defaults the largest overlay
+ * (100 markers, 20,000 coordinates, 2048 px) takes about 0.2 s and 30 MB.
+ * Unbounded, a 5 MB POST fits ~150,000 markers, each loading and decoding its icon, which took one request 25 s and 1.4 GB.
+ * @param {object} options Configuration options.
+ * @returns {{markers: number, paths: number, pathPoints: number}} Maximum markers, paths and path coordinates per request.
+ */
+function getOverlayLimits (options) {
+  const limit = (value, def) => (Number.isInteger(value) && value >= 0 ? value : def)
+  return {
+    markers: limit(options.maxStaticMarkers, 100),
+    paths: limit(options.maxStaticPaths, 100),
+    pathPoints: limit(options.maxStaticPathPoints, 20000)
+  }
+}
+
+/**
+ * Rejects a request with more markers or paths than allowed, by counting the raw query values before any of them is parsed.
+ * @param {object} query Request query parameters.
+ * @param {{markers: number, paths: number}} limits Overlay limits.
+ * @returns {void}
+ * @throws {OverlayLimitError} When a count exceeds its limit.
+ */
+function checkOverlayCounts (query, limits) {
+  const count = (value) => {
+    if (value === undefined || value === '') return 0
+    return Array.isArray(value) ? value.length : 1
+  }
+  if (count(query.marker) > limits.markers) {
+    throw new OverlayLimitError(`Too many markers: at most ${limits.markers} allowed`)
+  }
+  if (count(query.path) > limits.paths) {
+    throw new OverlayLimitError(`Too many paths: at most ${limits.paths} allowed`)
+  }
+}
+
+/**
+ * Counts the coordinates an encoded polyline decodes to, without decoding it, so an oversized one is rejected before
+ * polyline.decode allocates every point: 2 MB of "??" decodes to a million coordinates.
+ * Mirrors polyline.decode: each coordinate is two values, a value ends at a character without the continuation bit
+ * (code - 63 < 0x20), a run of continuation characters at the end of the string still ends a value, and an odd value
+ * still yields a coordinate.
+ * @param {string} encoded The polyline, without the "enc:" prefix.
+ * @param {number} max Count beyond which counting stops.
+ * @returns {number} The coordinate count, or max + 1 once it is known to exceed max.
+ */
+export function countEncodedPoints (encoded, max) {
+  let values = 0
+  for (let i = 0; i < encoded.length; i++) {
+    if (encoded.charCodeAt(i) - 63 < 0x20 && ++values > 2 * max) {
+      return max + 1
+    }
+  }
+  if (encoded.length > 0 && encoded.charCodeAt(encoded.length - 1) - 63 >= 0x20) {
+    values++
+  }
+  return Math.ceil(values / 2)
+}
+
+/**
  * Parses paths provided via query into a list of path objects.
  * @param {object} query Request query parameters.
  * @param {((coords: Array<number>) => Array<number>)|null} transformer Optional transform function.
+ * @param {number} [maxPoints] Most coordinates allowed across all paths.
  * @returns {Array<Array<Array<number>>>} Array of paths.
+ * @throws {OverlayLimitError} When the paths hold more than maxPoints coordinates.
  */
-function extractPathsFromQuery (query, transformer) {
+function extractPathsFromQuery (query, transformer, maxPoints = Infinity) {
+  let points = 0
+  const countPoints = (n) => {
+    points += n
+    if (points > maxPoints) {
+      throw new OverlayLimitError(`Too many path coordinates: at most ${maxPoints} allowed`)
+    }
+  }
   // Initiate paths array
   const paths = []
   // Return an empty list if no paths have been provided
@@ -320,7 +403,10 @@ function extractPathsFromQuery (query, transformer) {
       ) {
         // +4 because 'enc:' is 4 characters, everything after 'enc:' is considered to be part of the polyline
         const encIndex = geometryString.indexOf('enc:') + 4
-        const coords = polyline.decode(geometryString.substring(encIndex)).map(([lat, lng]) => [lng, lat])
+        const encoded = geometryString.substring(encIndex)
+        // Counted before decoding, against what is left of the budget, so an oversized polyline is never decoded.
+        countPoints(countEncodedPoints(encoded, maxPoints - points))
+        const coords = polyline.decode(encoded).map(([lat, lng]) => [lng, lat])
         paths.push(coords)
       } else {
         // Iterate through paths, parse and validate them
@@ -343,6 +429,7 @@ function extractPathsFromQuery (query, transformer) {
             }
 
             // Add the coordinate-pair to the current path if they are valid
+            countPoints(1)
             currentPath.push(pair)
           }
         }
@@ -1078,6 +1165,9 @@ async function handleStaticRequest (
     return res.status(400).send('Invalid size')
   }
 
+  const overlayLimits = getOverlayLimits(options)
+  checkOverlayCounts(req.query, overlayLimits)
+
   if (staticTypeMatch.groups.lon) {
     // Center Based Static Image
     const z = parseFloat(staticTypeMatch.groups.zoom) || 0
@@ -1099,7 +1189,7 @@ async function handleStaticRequest (
       y = ll[1]
     }
 
-    const paths = extractPathsFromQuery(req.query, transformer)
+    const paths = extractPathsFromQuery(req.query, transformer, overlayLimits.pathPoints)
     const markers = extractMarkersFromQuery(req.query, options, transformer)
     const overlay = await renderOverlay(
       z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query
@@ -1140,7 +1230,7 @@ async function handleStaticRequest (
     const bearing = 0
     const pitch = 0
 
-    const paths = extractPathsFromQuery(req.query, transformer)
+    const paths = extractPathsFromQuery(req.query, transformer, overlayLimits.pathPoints)
     const markers = extractMarkersFromQuery(req.query, options, transformer)
     const overlay = await renderOverlay(
       z, x, y, bearing, pitch, parsedWidth, parsedHeight, scale, paths, markers, req.query
@@ -1156,7 +1246,7 @@ async function handleStaticRequest (
 
     const transformer = isRaw ? mercator.inverse.bind(mercator) : item.dataProjWGStoInternalWGS
 
-    const paths = extractPathsFromQuery(req.query, transformer)
+    const paths = extractPathsFromQuery(req.query, transformer, overlayLimits.pathPoints)
     const markers = extractMarkersFromQuery(req.query, options, transformer)
 
     // Extract coordinates from markers
@@ -1287,7 +1377,7 @@ export const serve_rendered = {
 
         if (requestType === 'static') {
           if (options.serveStaticMaps !== false) {
-            return handleStaticRequest(
+            return await handleStaticRequest(
               options,
               repo,
               req,
@@ -1309,6 +1399,9 @@ export const serve_rendered = {
           defailtTileSize
         )
       } catch (e) {
+        if (e instanceof OverlayLimitError) {
+          return res.status(400).send(e.message)
+        }
         console.log(e)
         return next(e)
       }
