@@ -17,6 +17,7 @@ import {
   lonLatToTilePixel,
   parseOptionalBoolean,
   resolveSparse,
+  sendTileSourceError,
   setCacheControl,
   setHostDerivedCacheControl
 } from './utils.js'
@@ -117,13 +118,21 @@ export const serve_data = {
         return res.status(404).send('Out of bounds')
       }
 
-      const fetchTile = await fetchTileData(
-        item.source,
-        item.sourceType,
-        z,
-        x,
-        y
-      )
+      let fetchTile
+      try {
+        fetchTile = await fetchTileData(
+          item.source,
+          item.sourceType,
+          z,
+          x,
+          y
+        )
+      } catch (err) {
+        if (metricsModule) {
+          metricsModule.tileErrorsTotal.inc({ type: 'vector', name: req.params.id })
+        }
+        return sendTileSourceError(res, err, `/data/${req.params.id}/${z}/${x}/${y}`)
+      }
       if (fetchTile == null) {
         // sparse=true (default) -> 404 (allows overzoom)
         // sparse=false -> 204 (empty tile, no overzoom)

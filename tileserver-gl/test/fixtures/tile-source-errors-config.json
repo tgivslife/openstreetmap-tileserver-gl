@@ -1,0 +1,25 @@
+{
+  "options": {
+    "paths": {
+      "root": "../../test_data",
+      "fonts": "fonts",
+      "styles": "styles"
+    },
+    "minRendererPoolSizes": [
+      1
+    ],
+    "maxRendererPoolSizes": [
+      1
+    ]
+  },
+  "styles": {
+    "test-style": {
+      "style": "osm-bright/style.json"
+    }
+  },
+  "data": {
+    "openmaptiles": {
+      "mbtiles": "zurich_switzerland.mbtiles"
+    }
+  }
+}

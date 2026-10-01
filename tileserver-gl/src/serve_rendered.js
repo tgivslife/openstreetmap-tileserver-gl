@@ -36,8 +36,10 @@ import {
   parseOptionalBoolean,
   readFile,
   resolveSparse,
+  sendTileSourceError,
   setCacheControl,
-  setHostDerivedCacheControl
+  setHostDerivedCacheControl,
+  TileSourceError
 } from './utils.js'
 import { getPMtilesInfo, openPMtiles } from './pmtiles_adapter.js'
 import { renderAttribution, renderOverlay, renderWatermark } from './render.js'
@@ -74,6 +76,10 @@ const mercator = new SphericalMercator()
 // is itself broken and has to be replaced.
 const rendererFailures = new WeakMap()
 const MAX_CONSECUTIVE_RENDER_FAILURES = 3
+
+// The TileSourceError behind a renderer's current render, if one of its tile reads failed. MapLibre fails the render with an error of
+// its own that carries only the message, so this is how the render callback learns the storage failed and which status to answer.
+const rendererSourceErrors = new WeakMap()
 
 mlgl.on('message', (e) => {
   if (e.severity === 'WARNING' || e.severity === 'ERROR') {
@@ -709,14 +715,27 @@ async function respondImage (
       }
     }, 30000) // 30 second timeout
 
+    rendererSourceErrors.delete(renderer)
     try {
       renderer.render(params, (err, data) => {
         clearTimeout(renderTimeout)
+        const sourceError = rendererSourceErrors.get(renderer)
+        rendererSourceErrors.delete(renderer)
 
         if (res.headersSent) {
           // The timeout already answered the request and discarded the renderer, so this is a no-op unless some other path responded.
           releaseRenderer()
           return
+        }
+
+        if (sourceError) {
+          // Answer with the source's status. Even if MapLibre rendered anyway, the image lacks the tile that failed, so it is not served.
+          // The renderer is replaced, not kept: one whose tile read failed made no reads on its next render and hung until the render timeout.
+          discardRenderer(`tile source error: ${sourceError.message}`)
+          if (metricsModule) {
+            metricsModule.tileErrorsTotal.inc({ type: 'rendered', name: id })
+          }
+          return sendTileSourceError(res, sourceError, `rendered ${id} at z${z} ${lon},${lat}`)
         }
 
         if (err) {
@@ -1650,7 +1669,12 @@ export const serve_rendered = {
             try {
               await handleRendererRequest(req, respond)
             } catch (err) {
-              console.error(`Error handling renderer request for ${req.url}:`, err)
+              if (err instanceof TileSourceError) {
+                // Logged once, by the render callback that answers with it.
+                rendererSourceErrors.set(renderer, err)
+              } else {
+                console.error(`Error handling renderer request for ${req.url}:`, err)
+              }
               respond(err)
             }
           }

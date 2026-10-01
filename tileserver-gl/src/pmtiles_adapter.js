@@ -548,7 +548,7 @@ export function clearPMtilesCache () {
  * @param {Error} error - The caught error (raw AWS SDK error or a wrapped one).
  * @returns {boolean} - True if the request should be retried.
  */
-function isThrottleError (error) {
+export function isThrottleError (error) {
   if (!error) return false
   const status = error.$metadata?.httpStatusCode
   if (status === 429 || status === 503) return true
@@ -687,17 +687,14 @@ export async function getPMtilesTile (pmtiles, z, x, y, maxRetries = 3) {
         continue
       }
 
-      if (error.message && error.message.includes('Bad response code:')) {
-        console.error(`HTTP error for tile ${z}/${x}/${y}: ${error.message}`)
-        return { data: undefined, header: tileType?.header }
-      }
-
+      // Every failure is thrown, including an HTTP archive's "Bad response code:": an absent tile is getZxy returning no data,
+      // so answering a failure as no data would serve a storage outage as empty geography.
       throw error
     }
   }
 
-  console.error(`Failed to fetch tile ${z}/${x}/${y} after ${maxRetries} attempts`)
-  return { data: undefined, header: tileType?.header }
+  // Unreachable while maxRetries >= 1: the last attempt returns or throws.
+  throw new Error(`Failed to fetch tile ${z}/${x}/${y} after ${maxRetries} attempts`)
 }
 
 /**

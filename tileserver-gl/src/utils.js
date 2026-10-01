@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import clone from 'clone'
 import { combine } from '@jsse/pbfont'
 import { existsP } from './promises.js'
-import { getPMtilesTile } from './pmtiles_adapter.js'
+import { getPMtilesTile, isThrottleError } from './pmtiles_adapter.js'
 
 export const allowedSpriteFormats = allowedOptions(['png', 'json'])
 export const allowedTileSizes = allowedOptions(['256', '512'])
@@ -630,36 +630,84 @@ export function lonLatToTilePixel (lon, lat, zoom, tileSize) {
 }
 
 /**
+ * A tile read that failed for a reason other than the tile being absent: storage denied, unreachable, throttled, timed out
+ * or unreadable. Kept apart from an absent tile so an outage is answered as an error, not as empty geography.
+ */
+export class TileSourceError extends Error {
+  /**
+   * Creates a TileSourceError.
+   * @param {string} message - What failed, for the server log.
+   * @param {object} details - Error details.
+   * @param {Error} details.cause - The underlying error.
+   * @param {number} details.status - HTTP status to answer with: 504 when remote storage timed out, 503 when it is throttling,
+   *   502 for another remote failure, 500 for a local archive.
+   */
+  constructor (message, { cause, status }) {
+    super(message, { cause })
+    this.name = 'TileSourceError'
+    this.status = status
+  }
+}
+
+/**
  * Fetches tile data from either PMTiles or MBTiles source.
  * @param {object} source - The source object, which may contain a mbtiles object, or pmtiles object.
  * @param {string} sourceType - The source type, which should be `pmtiles` or `mbtiles`
  * @param {number} z - The zoom level.
  * @param {number} x - The x coordinate of the tile.
  * @param {number} y - The y coordinate of the tile.
- * @returns {Promise<object | null>} - A promise that resolves to an object with data and headers or null if no data is found.
+ * @returns {Promise<object | null>} - A promise that resolves to an object with data and headers, or null if the archive has no such tile.
+ * @throws {TileSourceError} - When the archive could not be read.
  */
 export async function fetchTileData (source, sourceType, z, x, y) {
   if (sourceType === 'pmtiles') {
+    let tileInfo
     try {
-      const tileInfo = await getPMtilesTile(source, z, x, y)
-      if (!tileInfo?.data) {
-        return null
-      }
-      return { data: tileInfo.data, headers: tileInfo.header }
+      tileInfo = await getPMtilesTile(source, z, x, y)
     } catch (error) {
-      console.error('Error fetching PMTiles tile:', error)
+      let status = 502
+      if (error?.name === 'TimeoutError') {
+        status = 504
+      } else if (isThrottleError(error)) {
+        status = 503
+      }
+      throw new TileSourceError(`PMTiles read failed for tile ${z}/${x}/${y}`, { cause: error, status })
+    }
+    if (!tileInfo?.data) {
       return null
     }
+    return { data: tileInfo.data, headers: tileInfo.header }
   } else if (sourceType === 'mbtiles') {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       source.getTile(z, x, y, (err, tileData, tileHeader) => {
-        if (err || tileData == null) {
+        // @mapbox/mbtiles reports an absent row as this error; anything else is the archive failing to read.
+        if (err?.message === 'Tile does not exist' || (!err && tileData == null)) {
           return resolve(null)
+        }
+        if (err) {
+          return reject(new TileSourceError(`MBTiles read failed for tile ${z}/${x}/${y}`, { cause: err, status: 500 }))
         }
         resolve({ data: tileData, headers: tileHeader })
       })
     })
   }
+}
+
+/**
+ * Answers a request whose tile could not be read, with no-store so neither the browser nor a shared cache keeps the failure.
+ * The body is generic: the cause can name filesystem paths or S3 buckets and keys, so it goes to the server log only.
+ * @param {object} res - Express response object.
+ * @param {Error} error - The error from fetchTileData.
+ * @param {string} what - The request, for the log.
+ * @returns {object} - The response.
+ */
+export function sendTileSourceError (res, error, what) {
+  console.error(`Tile source error for ${what}:`, error?.cause ?? error)
+  return res
+    .status(error instanceof TileSourceError ? error.status : 500)
+    .set('Cache-Control', 'no-store')
+    .type('text/plain')
+    .send('Tile source unavailable')
 }
 
 /**
