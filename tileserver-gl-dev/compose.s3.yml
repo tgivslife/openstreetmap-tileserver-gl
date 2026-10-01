@@ -29,7 +29,7 @@
 #
 #      docker compose -f compose.s3.yml up -d
 #
-#      MinIO console : http://localhost:9101   (minioadmin / minioadmin)
+#      MinIO console : http://localhost:9101   (minioadmin / minioadmin unless overridden, see below)
 #      Tileserver    : http://localhost:8082
 #      A tile        : http://localhost:8082/data/planet-s3/10/582/366.pbf
 #
@@ -45,8 +45,8 @@
 name: tileserver-s3
 
 x-minio-creds: &minio-creds
-  MINIO_ROOT_USER: minioadmin
-  MINIO_ROOT_PASSWORD: minioadmin
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
 
 services:
   minio:
@@ -57,8 +57,8 @@ services:
     environment:
       <<: *minio-creds
     ports:
-      - "9100:9000" # S3 API
-      - "9101:9001" # web console
+      - "127.0.0.1:9100:9000" # S3 API
+      - "127.0.0.1:9101:9001" # web console
     volumes:
       - minio_data:/data
       - ./minio.license:/minio.license:ro
@@ -98,8 +98,8 @@ services:
       minio-setup:
         condition: service_completed_successfully
     environment:
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       AWS_REGION: us-east-1
       # S3 client connection pool (optional; defaults shown). The AWS SDK caps
       # concurrent connections at 50 sockets by default — raise max-sockets for
@@ -123,7 +123,7 @@ services:
       #     http://localhost:8082/data/planet-s3/10/582/366.pbf            # 403
       #
       # 1) Static key — comma-separated; append ?key=devkey123 to any request:
-      TILESERVER_GL_API_KEYS: "devkey123"
+      TILESERVER_GL_API_KEYS: "${TILESERVER_GL_API_KEYS:-devkey123}"
       #     curl ".../366.pbf?key=devkey123"                               # 200
       #
       # 2) Expiring HMAC token — key=<unix-expiry>.<hmac_sha256(expiry, secret)>.
@@ -131,14 +131,14 @@ services:
       #      node gen-token.js            # 1h token   (node gen-token.js 86400 = 24h)
       #      curl ".../366.pbf?key=<token>"                                # 200
       #    It defaults to the secret below; if you change the secret, generate with a matching env: `TILESERVER_GL_TOKEN_SECRET=<secret> node gen-token.js`.
-      TILESERVER_GL_TOKEN_SECRET: "dev-hmac-secret"
+      TILESERVER_GL_TOKEN_SECRET: "${TILESERVER_GL_TOKEN_SECRET:-dev-hmac-secret}"
       # Max seconds a token's expiry may sit in the future (default 604800 = 7d);
       # an expiry beyond now+this is rejected, capping mis-issued far-future tokens.
       TILESERVER_GL_TOKEN_MAX_TTL: "604800"
     # No `command:` override — the image's baked CMD (Dockerfile_light_s3) already runs `--config /data/config.json --silent --log_format ...`.
     # Add one here only to change those defaults (a command override replaces them entirely).
     ports:
-      - "8082:8080"
+      - "127.0.0.1:8082:8080"
 
   # Optional one-time tileset generation (mbtiles -> pmtiles), see header step 2.
   convert:

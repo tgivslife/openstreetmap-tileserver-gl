@@ -15,12 +15,13 @@ services:
   app:
     image: stsdockerhub/tileserver-gl:5.7.0-pre.0-light-s3
     environment:
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
+      # Same variables and defaults as compose.s3.yml, so an override there applies here too.
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       AWS_REGION: us-east-1
       PMTILES_URL: s3+http://minio:9000/tiles/planet.pmtiles
-      TILESERVER_GL_API_KEYS: devkey123
-      TILESERVER_GL_TOKEN_SECRET: dev-hmac-secret
+      TILESERVER_GL_API_KEYS: ${TILESERVER_GL_API_KEYS:-devkey123}
+      TILESERVER_GL_TOKEN_SECRET: ${TILESERVER_GL_TOKEN_SECRET:-dev-hmac-secret}
     command: ["--config", "/data/config.json", "--silent"]
     networks: [tsnet]
 
@@ -30,7 +31,7 @@ services:
     volumes:
       - ./nginx-lb.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - "8083:80" # optional host access at http://localhost:8083
+      - "127.0.0.1:8083:80" # optional host access at http://localhost:8083, loopback only
     networks: [tsnet]
 
 networks:
