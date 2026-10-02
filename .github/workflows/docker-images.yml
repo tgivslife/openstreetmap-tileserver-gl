@@ -1,9 +1,10 @@
 # Builds the light and light-s3 images for linux/amd64 and linux/arm64, and publishes them to Docker Hub on a version tag.
 #
-#   git tag v1.0.0 && git push github v1.0.0     # publishes <repo>:1.0.0-light and <repo>:1.0.0-light-s3
+#   npm run release -- 1.1.0 && git push github main v1.1.0     # publishes <repo>:1.1.0-light and <repo>:1.1.0-light-s3
 #
-# The tag must be "v" + tileserver-gl/package.json's version, and the version check (scripts/version-sync.js --check)
-# must pass; otherwise nothing is built. Pushes to main and pull requests run the same builds without publishing.
+# The tag must be "v" + tileserver-gl/package.json's version, on the single release commit `npm run release` makes
+# (scripts/release.js --check); otherwise nothing is built. Pushes to main and pull requests run the same builds without
+# publishing.
 #
 # Needs, in the repository settings:
 #   secrets   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (a Docker Hub access token with read/write access)
@@ -43,11 +44,14 @@ jobs:
       publish: ${{ steps.read.outputs.publish }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2 # the release check compares the tagged commit with its parent
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Check version consistency
-        run: node tileserver-gl/scripts/version-sync.js --check
+      - name: Check the tag is on a release commit
+        if: github.ref_type == 'tag'
+        run: node tileserver-gl/scripts/release.js --check
       - name: Read version
         id: read
         run: |

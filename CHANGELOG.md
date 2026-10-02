@@ -13,14 +13,21 @@ All notable changes to this project. The format follows [Keep a Changelog](https
   starts with an `Upstream:` line naming it, followed by what was pulled from upstream since the previous release, or
   "nothing new".
 
-To release: move the `Unreleased` entries under a new version heading with its `Upstream:` line, set `version` with
-`npm version <x.y.z> --no-git-tag-version` in `tileserver-gl/` (and `upstreamVersion` if upstream was merged), run
-`npm run version:sync`, commit, then tag `v<x.y.z>` and push the tag to GitHub. The `Docker images` workflow builds the
-light and light-s3 images for amd64 and arm64 and publishes them to Docker Hub; it refuses a tag that does not match
-`version`. `npm test` fails while the version, this file and the compose files disagree. `PUSH=1 npm run images:build`
-remains for a manual, single-architecture publish.
+To release, on a clean `main`: `npm run release -- <x.y.z>` in `tileserver-gl/`, then
+`git push github main v<x.y.z>`. The script makes the release a single commit, `build(release): <x.y.z>`, which only
+moves the `Unreleased` entries under `## [<x.y.z>] - <today>`, sets `version` in `package.json` and `package-lock.json`
+and the image default in the dev compose files; it tags that commit `v<x.y.z>` with the release notes and pushes
+nothing. The `Docker images` workflow builds the light and light-s3 images for amd64 and arm64 and publishes
+them to Docker Hub; it refuses a tag that does not match `version` or is not on a release commit.
+`PUSH=1 npm run images:build` remains for a manual, single-architecture publish.
 
 ## [Unreleased]
+
+### Added
+
+- `npm run release -- <version>` cuts a release as a single `build(release): <version>` commit touching only the
+  changelog, `package.json`, `package-lock.json` and the dev compose files, and tags it; the image workflow refuses to
+  publish a version tag that is not on such a commit.
 
 ### Changed
 
@@ -29,6 +36,11 @@ remains for a manual, single-architecture publish.
   main and pull requests run the same chain against a throwaway registry on the runner.
 - The workflow's actions run on Node.js 24 (checkout, setup-node and upload-artifact v7, download-artifact v8,
   docker login v4, setup-buildx v4, build-push v7), clearing GitHub's Node.js 20 deprecation warning.
+
+### Removed
+
+- `scripts/version-sync.js` (`npm run version:sync`) and its test: the release script writes the version everywhere
+  it appears, so there is nothing left between releases for a consistency check to catch.
 
 ## [1.0.0] - 2026-10-02
 

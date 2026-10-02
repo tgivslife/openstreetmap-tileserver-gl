@@ -9,8 +9,7 @@
 # Labels: org.opencontainers.image.version / .revision (git commit, with -dirty for uncommitted changes) / .created,
 # and tileserver-gl.upstream.version from package.json's upstreamVersion. Read them back with
 #   docker inspect -f '{{json .Config.Labels}}' <image>
-# The version check (npm run version:sync -- --check) must pass first, so an image never ships a version the changelog
-# does not describe. light-s3 is built from ../tileserver-gl-data on top of the light image of the same version.
+# light-s3 is built from ../tileserver-gl-data on top of the light image of the same version.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -24,8 +23,6 @@ fi
 CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 targets=("$@")
 ((${#targets[@]})) || targets=(full light light-s3)
-
-node scripts/version-sync.js --check
 
 labels=(--build-arg "VERSION=$VERSION" --build-arg "UPSTREAM_VERSION=$UPSTREAM_VERSION"
         --build-arg "REVISION=$REVISION" --build-arg "CREATED=$CREATED")

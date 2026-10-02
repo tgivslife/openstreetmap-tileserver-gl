@@ -89,13 +89,15 @@ The sources live in [`tileserver-gl/`](tileserver-gl/README.md) and build into t
 `<ver>` is the fork's own version, kept in `tileserver-gl/package.json` and described release by release in
 [CHANGELOG.md](CHANGELOG.md), which also records the upstream tileserver-gl version each release is based on.
 
-Releases are published by GitHub Actions: pushing the tag `v<version>` builds the light and light-s3 images for
-amd64 and arm64 and pushes them to Docker Hub as `<version>-light` and `<version>-light-s3`
+Releases are published by GitHub Actions. `npm run release -- <version>` makes the release a single commit and tags
+it `v<version>` (see [CHANGELOG.md](CHANGELOG.md)); pushing that tag builds the light and light-s3 images for amd64 and
+arm64 and pushes them to Docker Hub as `<version>-light` and `<version>-light-s3`
 ([workflow](.github/workflows/docker-images.yml); it needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository
 secrets). To build locally instead, for your own architecture, tagged with the same version:
 
 ```bash
 cd tileserver-gl
+npm run release -- 1.1.0 && git push github main v1.1.0   # release through CI
 npm run images:build                      # all three; or: npm run images:build -- light light-s3
 PUSH=1 npm run images:build               # build and push, bypassing CI
 ```

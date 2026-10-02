@@ -30,7 +30,7 @@
     "test-docker": "xvfb-run npm test",
     "test:visual:generate": "cross-env GENERATE_FIXTURES=true mocha test/setup.js test/static_images.js --timeout 10000 --exit",
     "check:fonts": "node scripts/check-fonts.js",
-    "version:sync": "node scripts/version-sync.js",
+    "release": "node scripts/release.js",
     "images:build": "scripts/build-images.sh",
     "lint:yml": "yamllint --schema=CORE_SCHEMA *.{yml,yaml}",
     "lint:js": "npm run lint:eslint",
