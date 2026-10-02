@@ -6,18 +6,55 @@ tagged so the summary breaks p95/p99 down per endpoint.
 
 ## Run
 
-k6 on the host (`C:\Program Files\k6\k6.exe` on this machine):
+k6 on the host (`brew install k6`, or `C:\Program Files\k6\k6.exe` on Windows):
 
 ```powershell
-k6 run tiles-load.js
+k6 run tiles-load.js                                        # smoke test (closed model)
 k6 run -e VUS=200 -e DURATION=2m tiles-load.js
-k6 run -e KEY=static-key-1 tiles-load.js        # auth-enabled container
-k6 run -e RENDERED=1 tiles-load.js              # full image only (raster tiles)
+k6 run -e MODE=open -e RATE=400 tiles-load.js               # capacity test (open model), see below
+k6 run -e KEY=static-key-1 tiles-load.js                    # auth-enabled container, one key
+k6 run -e KEYS=k1,k2,k3 -e TOKEN_SECRET=dev-hmac-secret tiles-load.js   # many keys + per-user tokens
+k6 run -e RENDERED=1 tiles-load.js                          # full image only (raster tiles)
 ```
 
-Env: `BASE_URL STYLE DATA FONT KEY BBOX ZMIN ZMAX VUS DURATION RENDERED`
-(defaults target `http://localhost:8081`, `streets-v2`, `romania-tilemaker`, Romania bounds, zoom 8–14). Thresholds fail
-the run if vector p95 > 200 ms, error rate > 1 %, or checks < 99 %.
+Env: `BASE_URL STYLE DATA FONT BBOX ZMIN ZMAX RENDERED`, `MODE` with `VUS DURATION` (closed) or
+`RATE STEPS STEP_DURATION MAX_VUS` (open), `KEY KEYS TOKEN_SECRET TOKEN_TTL TOKEN_SHARE`, `CONDITIONAL_SHARE`. The header of
+`tiles-load.js` documents each. Defaults target `http://localhost:8081`, `streets-v2`, `romania-tilemaker`, Romania bounds,
+zoom 8–14. Thresholds fail the run if vector p95 > 200 ms, error rate > 1 %, checks < 99 %, or fewer than 99 % of
+revalidations answer 304; in open mode also if any step's p95 > 200 ms or k6 dropped iterations.
+
+## Load models: smoke vs capacity
+
+**Closed (`MODE=closed`, default): a smoke test.** `VUS` users loop back to back, each fetching a 2×2 viewport in
+parallel, so 50 VUs keep up to ~200 tile requests in flight. When the server slows, each VU sends less: the offered load
+falls exactly when it matters, so this answers "is it healthy at this concurrency", not "what rate can it take".
+
+**Open (`MODE=open`): a capacity test.** Iterations arrive at a set rate whatever the response times, climbing in `STEPS`
+equal steps up to `RATE` iterations/s (each ~3.7 requests: viewports of four tiles, revisits, the occasional style load),
+each step held `STEP_DURATION`. Every request is tagged with its step, and the summary prints one p95 line per step
+(illustrative values):
+
+```
+http_req_duration{name:vector_tile,level:200}   ✓ 'p(95)<200' p(95)=41ms
+http_req_duration{name:vector_tile,level:400}   ✗ 'p(95)<200' p(95)=612ms     ← the knee
+dropped_iterations                              ✗ 'count==0'  count=1834
+```
+
+The last passing step is the sustainable rate for that setup. Watch `dropped_iterations` too: when responses get slow
+enough that all `MAX_VUS` are busy, k6 skips arrivals instead of queueing them, so an overload can show up as drops while
+the p95 of the requests that did run still looks fine.
+
+## Auth and conditional traffic
+
+- **Many credentials.** `KEYS` spreads static keys over VUs round-robin. `TOKEN_SECRET` makes VUs sign their own expiring
+  tokens (`<expiry>.<hmac>`), as a backend would per user, renewing them in the last 10 % of `TOKEN_TTL`; with both set,
+  `TOKEN_SHARE` (default 0.5) of VUs use tokens. Each VU keeps one credential, so the server sees many distinct keys
+  instead of one.
+- **Conditional requests.** Each VU remembers its last 20 viewports with their `ETag` / `Last-Modified`, and
+  `CONDITIONAL_SHARE` (default 0.2) of viewport steps revisit one with `If-None-Match` / `If-Modified-Since`, as a browser
+  revalidates stale tiles. Those requests are tagged `vector_tile_revalidate` and should all answer 304
+  (`revalidation_not_modified`). On this server a revalidation still reads the tile before comparing the ETag, so expect
+  similar latency to a 200, just fewer bytes.
 
 ## ⚠ On Docker Desktop / Windows, benchmark from a named volume
 
@@ -107,6 +144,61 @@ one box here — a single MinIO, one nginx, and one k6 client on the same Docker
 tileserver. In production the ceiling lifts as those separate: real S3 / an object-store cluster, a managed LB, and
 above all **a CDN in front** — with the tile `Cache-Control` headers already set, most requests never reach origin,
 which is the real multiplier for a tile server.
+
+## Fault run: storage outage and reload
+
+`faults.sh` drives `faults.js` against the `compose.s3.yml` stack: a steady 50 requests/s for 150 s, while it pauses MinIO
+for 20 s at 30 s (a storage outage) and sends the tileserver `SIGHUP` at 90 s (a config reload). Needs k6 and docker on
+the host; Windows users run it from WSL or Git Bash.
+
+```bash
+docker compose -f ../compose.s3.yml up -d      # from tileserver-gl-dev/, first
+./faults.sh                                    # from k6/
+PAUSE_AT=20 PAUSE_FOR=30 RELOAD_AT=80 DURATION=120 RATE=100 ./faults.sh
+```
+
+Every request is tagged with the phase it falls in, and the thresholds check:
+
+- **baseline, recovered, final**: under 1 % failed.
+- **outage**: failures are only 502/503/504, each faster than `FAULT_MAX_MS` (default 6 s, the 5 s S3 request timeout
+  plus 1 s) and marked `Cache-Control: no-store`, so nothing hangs and no CDN keeps the error; and there were some
+  (`outage_errors > 0`), proving MinIO was really paused.
+- **reload**: as for the outage, plus refused connections while the listener restarts (`reload_connection_errors`).
+
+The script always unpauses MinIO on exit, and exits with k6's status, so a failed threshold fails the run.
+
+## Sizing the S3 socket pool
+
+`TILESERVER_GL_S3_MAX_SOCKETS` (default 256) caps the S3 connections per container. Connections in use are roughly
+S3 reads per second × S3 response time, so the right value depends on the request rate you need and your storage's
+latency. A local MinIO answers in well under a millisecond, which would make any value look sufficient, so add realistic
+latency first. From `tileserver-gl-dev/`, with the stack up:
+
+```bash
+# 1. Delay MinIO's replies by your real S3 latency (here 20 ms ± 5 ms). Use your platform's alpine image (--platform)
+#    so tc runs natively; under emulation it fails with "Cannot talk to rtnetlink".
+docker run --rm --net container:tileserver-s3-minio-1 --cap-add NET_ADMIN alpine:3.22 \
+  sh -c "apk add -q iproute2 && tc qdisc add dev eth0 root netem delay 20ms 5ms"
+
+# 2. For each candidate, restart the tileserver with it and run the same capacity test.
+for sockets in 32 64 128 256; do
+  TILESERVER_GL_S3_MAX_SOCKETS=$sockets docker compose -f compose.s3.yml up -d tileserver-gl
+  sleep 10
+  (cd k6 && k6 run -e MODE=open -e RATE=400 -e STEPS=4 -e STEP_DURATION=30s \
+     -e BASE_URL=http://127.0.0.1:8082 -e DATA=planet-s3 -e KEY=devkey123 tiles-load.js)
+done
+
+# 3. Remove the delay.
+docker run --rm --net container:tileserver-s3-minio-1 --cap-add NET_ADMIN alpine:3.22 \
+  sh -c "apk add -q iproute2 && tc qdisc del dev eth0 root"
+```
+
+Keep the smallest value whose highest passing step matches 256's: past it, more sockets buy nothing, and each socket
+held open costs memory on the server and a connection on S3. For a production figure, run against the real bucket from
+the same region instead of MinIO plus a delay. In a short local run of this procedure (20 ms delay, one machine),
+8 sockets broke at 200 iterations/s (p95 2.5 s) while 256 held 200 and broke at 300, so the sweep does separate
+settings; the absolute numbers are not production figures. The first step of a run also includes PMTiles directory
+reads on a cold cache, so its p95 can be higher than the next step's.
 
 ## Reading the results
 

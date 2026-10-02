@@ -103,8 +103,9 @@ services:
       AWS_REGION: us-east-1
       # S3 client connection pool (optional; defaults shown). The AWS SDK caps
       # concurrent connections at 50 sockets by default — raise max-sockets for
-      # more parallel tile range-GETs under load.
-      # TILESERVER_GL_S3_MAX_SOCKETS: "256"
+      # more parallel tile range-GETs under load. Read from the environment so the
+      # socket sweep in k6/README.md can vary it without editing this file.
+      TILESERVER_GL_S3_MAX_SOCKETS: "${TILESERVER_GL_S3_MAX_SOCKETS:-256}"
       # TILESERVER_GL_S3_KEEP_ALIVE: "true"
       # TILESERVER_GL_S3_CONNECTION_TIMEOUT_MS: "5000"
       # TILESERVER_GL_S3_REQUEST_TIMEOUT_MS: "5000"   # 0 = no request timeout
