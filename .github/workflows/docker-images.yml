@@ -38,7 +38,6 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.read.outputs.version }}
-      upstream: ${{ steps.read.outputs.upstream }}
       revision: ${{ steps.read.outputs.revision }}
       created: ${{ steps.read.outputs.created }}
       publish: ${{ steps.read.outputs.publish }}
@@ -56,7 +55,6 @@ jobs:
         id: read
         run: |
           version=$(node -p "require('./tileserver-gl/package.json').version")
-          upstream=$(node -p "require('./tileserver-gl/package.json').upstreamVersion")
           publish=false
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
@@ -67,12 +65,11 @@ jobs:
           fi
           {
             echo "version=$version"
-            echo "upstream=$upstream"
             echo "revision=$(git rev-parse --short HEAD)"
             echo "created=$(git log -1 --format=%cI)"
             echo "publish=$publish"
           } >> "$GITHUB_OUTPUT"
-          echo "version $version (upstream $upstream), publish=$publish"
+          echo "version $version, publish=$publish"
 
   build:
     needs: version
@@ -121,7 +118,6 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           build-args: |
             VERSION=${{ needs.version.outputs.version }}
-            UPSTREAM_VERSION=${{ needs.version.outputs.upstream }}
             REVISION=${{ needs.version.outputs.revision }}
             CREATED=${{ needs.version.outputs.created }}
           outputs: type=image,name=${{ env.TARGET }},push-by-digest=true,name-canonical=true,push=true
@@ -135,7 +131,6 @@ jobs:
           build-args: |
             BASE=${{ env.TARGET }}@${{ steps.light.outputs.digest }}
             VERSION=${{ needs.version.outputs.version }}
-            UPSTREAM_VERSION=${{ needs.version.outputs.upstream }}
             REVISION=${{ needs.version.outputs.revision }}
             CREATED=${{ needs.version.outputs.created }}
           outputs: type=image,name=${{ env.TARGET }},push-by-digest=true,name-canonical=true,push=true

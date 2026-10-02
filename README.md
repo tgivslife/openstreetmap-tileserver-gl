@@ -103,7 +103,7 @@ PUSH=1 npm run images:build               # build and push, bypassing CI
 ```
 
 The S3 image is built on the light image of the same version, from `../tileserver-gl-data`. Each image is labelled with
-its version, git commit, build date and upstream base: `docker inspect -f '{{json .Config.Labels}}' <image>`. The dev
+its version, git commit and build date: `docker inspect -f '{{json .Config.Labels}}' <image>`. The dev
 compose files run the current version by default; set `TILESERVER_VERSION` to run another.
 
 Documentation: [Install](tileserver-gl/docs/1.INSTALL.md) ·

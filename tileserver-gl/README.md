@@ -4,8 +4,8 @@ Vector and raster maps with GL styles. Server-side rendering by MapLibre GL Nati
 Android, iOS, Leaflet, OpenLayers, GIS via WMTS, etc.
 
 This is the vendored copy of [maptiler/tileserver-gl](https://github.com/maptiler/tileserver-gl) used by this project.
-It has its own version (`version` in `package.json`); the upstream release it is based on is `upstreamVersion`, and the
-[changelog](../CHANGELOG.md) records both, release by release.
+It has its own version (`version` in `package.json`); the [changelog](../CHANGELOG.md) records it and the upstream
+release each version is based on, release by release.
 
 Download vector tiles from [OpenMapTiles](https://data.maptiler.com/downloads/planet/), or generate your own
 with [Planetiler](https://github.com/onthegomap/planetiler).

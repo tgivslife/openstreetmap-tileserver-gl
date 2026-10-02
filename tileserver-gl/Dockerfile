@@ -137,14 +137,12 @@ USER node:node
 
 # Provenance, set by scripts/build-images.sh from package.json and git; plain `docker build` leaves the defaults.
 ARG VERSION=dev
-ARG UPSTREAM_VERSION=unknown
 ARG REVISION=unknown
 ARG CREATED=unknown
 LABEL org.opencontainers.image.title="tileserver-gl" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
-      org.opencontainers.image.created="${CREATED}" \
-      tileserver-gl.upstream.version="${UPSTREAM_VERSION}"
+      org.opencontainers.image.created="${CREATED}"
 
 # tini as PID 1 reaps the Xvfb the entrypoint backgrounds;
 # without an init, node (PID 1) never reaps it and a crashed Xvfb lingers as a zombie.

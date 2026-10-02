@@ -8,10 +8,9 @@ All notable changes to this project. The format follows [Keep a Changelog](https
   the Docker images: `stsdockerhub/tileserver-gl:<version>`, `<version>-light` and `<version>-light-s3`, and the server
   reports it at startup and with `--version`. MAJOR for a breaking change to configuration, URLs or behaviour clients
   rely on; MINOR for a feature; PATCH for fixes only.
-- **The upstream base** is the [tileserver-gl](https://github.com/maptiler/tileserver-gl) release the code is built on,
-  kept in `package.json` `upstreamVersion` and in each image's `tileserver-gl.upstream.version` label. Every release below
-  starts with an `Upstream:` line naming it, followed by what was pulled from upstream since the previous release, or
-  "nothing new".
+- **The upstream base** is the [tileserver-gl](https://github.com/maptiler/tileserver-gl) release the code is built on.
+  It is recorded only here: a release that pulls from upstream starts with an `Upstream:` line naming the new base and
+  what was pulled.
 
 To release, on a clean `main`: `npm run release -- <x.y.z>` in `tileserver-gl/`, then
 `git push github main v<x.y.z>`. The script makes the release a single commit, `build(release): <x.y.z>`, which only
@@ -41,6 +40,8 @@ them to Docker Hub; it refuses a tag that does not match `version` or is not on 
 
 - `scripts/version-sync.js` (`npm run version:sync`) and its test: the release script writes the version everywhere
   it appears, so there is nothing left between releases for a consistency check to catch.
+- `upstreamVersion` in `package.json` and the images' `tileserver-gl.upstream.version` label: the upstream base is
+  recorded only in this changelog.
 
 ## [1.0.0] - 2026-10-02
 
