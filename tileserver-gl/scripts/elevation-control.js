@@ -75,8 +75,8 @@ class ElevationInfoControl {
 
       var coord = { 'z': Math.floor(map.getZoom()), 'x': lngLat.lng.toFixed(7), 'y': lngLat.lat.toFixed(7) }
 
-      for (var key in coord) {
-        url = url.replace(new RegExp('{' + key + '}', 'g'), coord[key])
+      for (var [key, value] of Object.entries(coord)) {
+        url = url.replace(new RegExp('{' + key + '}', 'g'), value)
       }
 
       try {
