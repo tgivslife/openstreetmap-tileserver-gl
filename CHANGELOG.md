@@ -22,12 +22,6 @@ remains for a manual, single-architecture publish.
 
 ## [Unreleased]
 
-### Added
-
-- GitHub Actions workflow (`.github/workflows/docker-images.yml`) that builds the light and light-s3 images for
-  linux/amd64 and linux/arm64 on every push to main and pull request, and on a `v<version>` tag publishes them to
-  Docker Hub as multi-architecture `<version>-light` and `<version>-light-s3`.
-
 ## [1.0.0] - 2026-10-02
 
 Upstream: tileserver-gl 5.7.0-pre.1. 5.7.0-pre.0 was vendored on 2026-08-04 (commit 401c968), replacing the earlier
@@ -59,6 +53,9 @@ This is the first versioned release of the fork; before it, the images were tagg
   revalidation traffic, a fault run that pauses storage and reloads the server, and an S3 socket-sizing procedure.
 - Versioned Docker images built by `npm run images:build`, labelled with version, git commit, build date and upstream
   base; this changelog.
+- GitHub Actions workflow (`.github/workflows/docker-images.yml`) that builds the light and light-s3 images for
+  linux/amd64 and linux/arm64 on every push to main and pull request, and on a `v<version>` tag publishes them to
+  Docker Hub as multi-architecture `<version>-light` and `<version>-light-s3`.
 
 ### Changed
 
