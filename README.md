@@ -16,7 +16,7 @@ The pipeline has two halves:
 
 | Path                  | Contents                                                                                                                                                                                                |
 |-----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `tileserver-gl/`      | Vendored tileserver-gl sources (v5.7.0-pre.0) and three Docker builds: `Dockerfile` (full), `Dockerfile_light` (vector-only), `Dockerfile_light_s3` (light + baked assets for stateless S3 deployment). |
+| `tileserver-gl/`      | Vendored tileserver-gl sources (upstream base in [CHANGELOG.md](CHANGELOG.md)) and three Docker builds: `Dockerfile` (full), `Dockerfile_light` (vector-only), `Dockerfile_light_s3` (light + baked assets for stateless S3 deployment). |
 | `tileserver-gl-data/` | Portable map assets — `config.json`, `styles/`, `fonts/` — mounted by the dev compose and baked into the S3 image.                                                                                      |
 | `tileserver-gl-dev/`  | Ready-to-run local environments: `compose.yml` (local mbtiles), `compose.s3.yml` (S3/MinIO), `compose.perf.yml` (k6), and `data/` holding the tile databases.                                           |
 
@@ -80,15 +80,19 @@ The sources live in [`tileserver-gl/`](tileserver-gl/README.md) and build into t
   and `fonts/` baked in from `tileserver-gl-data/` (`Dockerfile_light_s3`); a stateless container that reads tiles from
   S3. Same repository as the light image — the `-s3` tag suffix distinguishes the baked variant.
 
+`<ver>` is the fork's own version, kept in `tileserver-gl/package.json` and described release by release in
+[CHANGELOG.md](CHANGELOG.md), which also records the upstream tileserver-gl version each release is based on. Build the
+images with that version as their tag:
+
 ```bash
 cd tileserver-gl
-docker build -f Dockerfile . -t stsdockerhub/tileserver-gl:5.7.0-pre.0
-docker build -f Dockerfile_light . -t stsdockerhub/tileserver-gl:5.7.0-pre.0-light
-
-# S3 image = light base + assets from ../tileserver-gl-data (two-step build).
-# Same repository, `-s3` tag suffix marks the baked variant.
-docker build -f Dockerfile_light_s3 ../tileserver-gl-data --build-arg BASE=stsdockerhub/tileserver-gl:5.7.0-pre.0-light -t stsdockerhub/tileserver-gl:5.7.0-pre.0-light-s3
+npm run images:build                      # all three; or: npm run images:build -- light light-s3
+PUSH=1 npm run images:build               # build and push
 ```
+
+The S3 image is built on the light image of the same version, from `../tileserver-gl-data`. Each image is labelled with
+its version, git commit, build date and upstream base: `docker inspect -f '{{json .Config.Labels}}' <image>`. The dev
+compose files run the current version by default; set `TILESERVER_VERSION` to run another.
 
 Documentation: [Install](tileserver-gl/docs/1.INSTALL.md) ·
 [Usage and endpoints](tileserver-gl/docs/2.USAGE.md) ·

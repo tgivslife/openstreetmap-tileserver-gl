@@ -156,6 +156,17 @@ EXPOSE 8080
 
 USER node:node
 
+# Provenance, set by scripts/build-images.sh from package.json and git; plain `docker build` leaves the defaults.
+ARG VERSION=dev
+ARG UPSTREAM_VERSION=unknown
+ARG REVISION=unknown
+ARG CREATED=unknown
+LABEL org.opencontainers.image.title="tileserver-gl-light" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.created="${CREATED}" \
+      tileserver-gl.upstream.version="${UPSTREAM_VERSION}"
+
 ENTRYPOINT ["/usr/src/app/docker-entrypoint.sh"]
 
 # start-period gives slow first boots (large datasets) a grace window where a failing probe keeps the container "starting"

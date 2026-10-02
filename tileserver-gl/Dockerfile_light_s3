@@ -37,6 +37,18 @@ COPY --chown=node:node config.json /data/config.json
 COPY --chown=node:node styles      /data/styles
 COPY --chown=node:node fonts       /data/fonts
 
+# Provenance, set by scripts/build-images.sh. The base's labels carry over; these restate them for this image, whose baked
+# assets come from the same commit.
+ARG VERSION=dev
+ARG UPSTREAM_VERSION=unknown
+ARG REVISION=unknown
+ARG CREATED=unknown
+LABEL org.opencontainers.image.title="tileserver-gl-light-s3" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.created="${CREATED}" \
+      tileserver-gl.upstream.version="${UPSTREAM_VERSION}"
+
 # Default run args, baked in so the stateless image is self-contained: point at the baked config, stay quiet on successful requests
 # (--silent skips logging 200/304), and use an ISO-timestamped access-log line.
 # The :url token is key-redacted in server.js. Passing your own command/args at `docker run` compose `command:` replaces this whole default.

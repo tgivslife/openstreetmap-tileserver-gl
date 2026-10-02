@@ -16,7 +16,8 @@
 services:
   tileserver-gl:
     container_name: tileserver-perf
-    image: stsdockerhub/tileserver-gl:5.7.0-pre.0-light
+    # Version from tileserver-gl/package.json (npm run version:sync); set TILESERVER_VERSION to run another.
+    image: stsdockerhub/tileserver-gl:${TILESERVER_VERSION:-1.0.0}-light
     volumes:
       - "ts_data:/data"
     # --ignore-missing-files: the volume omits the 95 GB planet mbtiles, so the

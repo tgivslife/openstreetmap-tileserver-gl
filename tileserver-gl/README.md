@@ -3,8 +3,9 @@
 Vector and raster maps with GL styles. Server-side rendering by MapLibre GL Native. Map tile server for MapLibre GL JS,
 Android, iOS, Leaflet, OpenLayers, GIS via WMTS, etc.
 
-This is the vendored copy of [maptiler/tileserver-gl](https://github.com/maptiler/tileserver-gl) used by this project,
-currently based on **v5.7.0-pre.0** (see `package.json`).
+This is the vendored copy of [maptiler/tileserver-gl](https://github.com/maptiler/tileserver-gl) used by this project.
+It has its own version (`version` in `package.json`); the upstream release it is based on is `upstreamVersion`, and the
+[changelog](../CHANGELOG.md) records both, release by release.
 
 Download vector tiles from [OpenMapTiles](https://data.maptiler.com/downloads/planet/), or generate your own
 with [Planetiler](https://github.com/onthegomap/planetiler).

@@ -7,12 +7,12 @@
 # 1. Obtain the stateless image once. Compose does not build it — it consumes a fixed tag, so the same artifact runs here and in production.
 #    Either pull:
 #
-#      docker pull stsdockerhub/tileserver-gl:<ver>-light-s3
+#      docker pull stsdockerhub/tileserver-gl:<version>-light-s3
 #
-#    or build the two-step chain from ../tileserver-gl (the light base carries the code, the child bakes config.json + styles + fonts on top):
+#    or build the two-step chain from ../tileserver-gl (the light base carries the code, the child bakes config.json + styles + fonts on top),
+#    tagged with the version in tileserver-gl/package.json:
 #
-#      docker build -f Dockerfile_light . -t stsdockerhub/tileserver-gl:<ver>-light
-#      docker build -f Dockerfile_light_s3 ../tileserver-gl-data --build-arg BASE=stsdockerhub/tileserver-gl:<ver>-light -t stsdockerhub/tileserver-gl:<ver>-light-s3
+#      npm run images:build -- light light-s3
 #
 # 2. Generate the tileset once (mbtiles -> pmtiles). The go-pmtiles image is distroless (no shell), so this is a plain `convert`,
 #    guarded by a profile so it never runs on a normal `up`:
@@ -93,7 +93,8 @@ services:
 
   # Stateless: config/styles/fonts are baked in (see Dockerfile_light_s3); the only runtime input is the S3 tile data and the credentials below. No mounts.
   tileserver-gl:
-    image: stsdockerhub/tileserver-gl:5.7.0-pre.0-light-s3
+    # Version from tileserver-gl/package.json (npm run version:sync); set TILESERVER_VERSION to run another.
+    image: stsdockerhub/tileserver-gl:${TILESERVER_VERSION:-1.0.0}-light-s3
     depends_on:
       minio-setup:
         condition: service_completed_successfully
