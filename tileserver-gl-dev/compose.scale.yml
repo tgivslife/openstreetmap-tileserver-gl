@@ -14,7 +14,7 @@ services:
   # through the LB on the shared network. Same image/env as the single stack.
   app:
     # Defaults to the latest release (set by npm run release); set TILESERVER_VERSION to run another.
-    image: stsdockerhub/tileserver-gl:${TILESERVER_VERSION:-1.0.0}-light-s3
+    image: stsdockerhub/tileserver-gl:${TILESERVER_VERSION:-1.0.1}-light-s3
     environment:
       # Same variables and defaults as compose.s3.yml, so an override there applies here too.
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}

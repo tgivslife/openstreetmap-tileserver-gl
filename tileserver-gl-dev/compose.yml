@@ -2,7 +2,7 @@ services:
   tileserver-gl:
     container_name: tileserver-gl
     # Defaults to the latest release (set by npm run release); set TILESERVER_VERSION to run another.
-    image: stsdockerhub/tileserver-gl:${TILESERVER_VERSION:-1.0.0}-light
+    image: stsdockerhub/tileserver-gl:${TILESERVER_VERSION:-1.0.1}-light
     volumes:
       - "./data:/data" # config.json + tile databases (mbtiles/pmtiles)
       # styles and fonts live in the shared assets folder, mounted into /data:

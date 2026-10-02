@@ -22,6 +22,8 @@ them to Docker Hub; it refuses a tag that does not match `version` or is not on 
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-02
+
 ### Added
 
 - `npm run release -- <version>` cuts a release as a single `build(release): <version>` commit touching only the
