@@ -22,9 +22,19 @@ this file and the compose files disagree.
 
 ## [1.0.0] - 2026-10-02
 
-Upstream: tileserver-gl 5.7.0-pre.0. Vendored on 2026-08-04 (commit 401c968), replacing the earlier 5.1.3 base
-(2025-01-29); nothing pulled from upstream since. This is the first versioned release of the fork; the images were
-tagged with the upstream version before it.
+Upstream: tileserver-gl 5.7.0-pre.1. 5.7.0-pre.0 was vendored on 2026-08-04 (commit 401c968), replacing the earlier
+5.1.3 base (2025-01-29), and the 5.7.0-pre.1 changes (upstream release of 2026-08-31) were ported on 2026-09-30.
+Pulled from 5.7.0-pre.1:
+
+- opt-in Prometheus metrics endpoint (#2211); the data decorator may be async (#2352), and runs on Windows and for
+  PMTiles style sources (#2351)
+- fixes: renderer requests and pool slots are always settled (#2347); 512 px static map overlays align (#2344);
+  the format-based sparse default is restored and an archive's own `sparse` metadata is honoured (#2348, #2350);
+  stale tile-source state is cleaned on `SIGHUP` reload (#2158); `public_url` in the WMTS endpoint (#2205); a style
+  source given as a string no longer throws (#2179); native install scripts are allowed under npm 12 so canvas builds
+  (#2343)
+
+This is the first versioned release of the fork; before it, the images were tagged with the upstream version.
 
 ### Added
 
@@ -61,15 +71,12 @@ tagged with the upstream version before it.
   `--config` file is honoured.
 - **Caching:** a response under an expiring token is never fresh beyond the token's expiry; `If-None-Match` takes
   precedence over `If-Modified-Since`, and 304 responses carry the right headers.
-- **Rendering (full image):** a resource the renderer cannot load fails its tile at once; overzoomed tiles are answered;
-  512 px static maps render at their overlay's zoom; renderers whose tile read failed are replaced; reload stops each
-  style's metrics timer.
+- **Rendering (full image):** a renderer whose tile read failed is replaced instead of reused in a stuck state; reload
+  stops each style's metrics timer.
 - **Viewer:** a browser that cannot start MapLibre gets the raster map or a message instead of a blank page; the raster
   view opens on the style's area when the URL has no position.
 - **Metrics:** font metrics are labelled by known font instead of the requested stack; renderer pool gauges report real
   counts.
-- **Config and data:** the sparse-tile default and an archive's own `sparse` setting apply to rendered styles; a data
-  decorator runs on every platform and source, and may be async.
 - `gen-token.js` only prints tokens the server accepts.
 
 ### Security
