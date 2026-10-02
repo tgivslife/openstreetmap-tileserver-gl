@@ -15,10 +15,18 @@ All notable changes to this project. The format follows [Keep a Changelog](https
 
 To release: move the `Unreleased` entries under a new version heading with its `Upstream:` line, set `version` with
 `npm version <x.y.z> --no-git-tag-version` in `tileserver-gl/` (and `upstreamVersion` if upstream was merged), run
-`npm run version:sync`, commit, tag `v<x.y.z>`, then `PUSH=1 npm run images:build`. `npm test` fails while the version,
-this file and the compose files disagree.
+`npm run version:sync`, commit, then tag `v<x.y.z>` and push the tag to GitHub. The `Docker images` workflow builds the
+light and light-s3 images for amd64 and arm64 and publishes them to Docker Hub; it refuses a tag that does not match
+`version`. `npm test` fails while the version, this file and the compose files disagree. `PUSH=1 npm run images:build`
+remains for a manual, single-architecture publish.
 
 ## [Unreleased]
+
+### Added
+
+- GitHub Actions workflow (`.github/workflows/docker-images.yml`) that builds the light and light-s3 images for
+  linux/amd64 and linux/arm64 on every push to main and pull request, and on a `v<version>` tag publishes them to
+  Docker Hub as multi-architecture `<version>-light` and `<version>-light-s3`.
 
 ## [1.0.0] - 2026-10-02
 
