@@ -104,16 +104,33 @@ docker run --rm --network tileserver-s3_default -v "${PWD}\k6:/scripts" `
   -e VUS=50 -e DURATION=1m grafana/k6 run /scripts/tiles-load.js
 ```
 
-Measured on this machine (32 cores, Docker Desktop), Romania tileset, zoom 8–14, **0 errors** throughout:
+Romania tileset, zoom 8–14, closed model with one key and no revalidation traffic (`CONDITIONAL_SHARE=0`), **0 errors**
+throughout. Two machines:
 
-| load    | throughput | vector p95 | vector p99 |
-|---------|------------|------------|------------|
-| 50 VUs  | 639 req/s  | 632 ms     | 838 ms     |
-| 200 VUs | 613 req/s  | **2.72 s** | 4.1 s      |
+| load    | Windows, 32 cores, k6 in-network | Apple M1 Max, Docker VM 8 CPUs, k6 on the host (2026-10-02) |
+|---------|-----------------------------------|-------------------------------------------------------------|
+| 50 VUs  | 639 req/s, p95 632 ms, p99 838 ms | 1,266 req/s, 46.5 MB/s, p95 354 ms, p99 508 ms               |
+| 200 VUs | 613 req/s, p95 **2.72 s**, p99 4.1 s | 1,272 req/s, 46.8 MB/s, p95 **1.47 s**, p99 2.18 s        |
 
-One light container tops out at **~640 req/s / ~40 MB/s** and saturates around **50 concurrent users** — the single JS
-event loop is the wall. Past the knee you only add latency: 200 VUs gave *no* more throughput than 50, just ~4× the p95.
-It never drops requests, though — 0 errors even when overloaded.
+On both, one light container saturates by about **50 concurrent users**: past that, more users add only latency (four
+times the users gave ~4× the p95 and no more throughput). It never drops requests, though: 0 errors even when overloaded.
+On the Mac the container used ~3.3 CPUs at saturation, so more than one core is in play (the S3 client, gzip and the
+network stack), not only the JS event loop.
+
+**Capacity (open model)**, same Mac, `MODE=open RATE=400 STEPS=8 STEP_DURATION=20s MAX_VUS=150`, 0 errors:
+
+| iterations/s (~3.7 req each) | 50    | 100   | 150   | 200    | 250        | 300        | 350        | 400        |
+|------------------------------|-------|-------|-------|--------|------------|------------|------------|------------|
+| vector p95                   | 28 ms | 32 ms | 49 ms | 103 ms | 272 ms ✗   | 480 ms ✗   | 1.08 s ✗   | 1.26 s ✗   |
+
+So one container holds p95 < 200 ms up to **~200 iterations/s, about 740 req/s**; past that latency climbs and k6 starts
+dropping iterations (2,854 over the run).
+
+**⚠ Docker Desktop on macOS: cap `MAX_VUS` when k6 runs on the host.** With `MAX_VUS=400` the first steps, at only 50
+and 100 iterations/s, had requests hang to k6's 60 s timeout (0.8 % failed); with 100 or 150 VUs, or against the same
+server run natively without Docker, nothing hung. Hundreds of VUs open a burst of new connections (four per viewport)
+through Docker Desktop's port forward to `localhost`, and part of the burst stalls. Keep `MAX_VUS` around 150 on the
+host, or run k6 in-network as above, which skips the port forward.
 
 ### Scaling out
 
@@ -129,7 +146,7 @@ docker run --rm --network tileserver-s3_default -v "${PWD}\k6:/scripts" `
 docker compose -f compose.scale.yml down
 ```
 
-Same 200-VU load, 1 container vs 4 replicas:
+Same 200-VU load, 1 container vs 4 replicas, on the Windows machine with k6 in-network:
 
 |            | 1 container | 4 replicas + LB        |
 |------------|-------------|------------------------|
@@ -144,6 +161,12 @@ one box here — a single MinIO, one nginx, and one k6 client on the same Docker
 tileserver. In production the ceiling lifts as those separate: real S3 / an object-store cluster, a managed LB, and
 above all **a CDN in front** — with the tile `Cache-Control` headers already set, most requests never reach origin,
 which is the real multiplier for a tile server.
+
+On the M1 Max with k6 on the host (through the load balancer's published port, 2026-10-02), 4 replicas gave **no** gain:
+1,143 req/s at 200 VUs (p95 769 ms, half the single container's, but no more throughput), and the open-model run held
+p95 < 200 ms only up to 150 iterations/s, versus 200 for one container. Each replica used ~1.1 CPUs and MinIO ~0.9, so
+something shared caps the aggregate there; the port forward that stalls connection bursts (above) is the likely suspect,
+but that was not isolated. Compare scaling with k6 in-network, as in the Windows run.
 
 ## Fault run: storage outage and reload
 

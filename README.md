@@ -176,20 +176,24 @@ docker compose kill -s HUP tileserver-gl
 
 ## Performance
 
-Rough numbers from the `compose.s3.yml` stack (light image, tiles read from MinIO over the S3 path; 32-core host, Docker
-Desktop; Romania tileset, zoom 8–14; k6 driven in-network, **0 errors** throughout):
+Rough numbers from the `compose.s3.yml` stack (light image, tiles read from MinIO over the S3 path; Romania tileset,
+zoom 8–14; closed-model k6 with one key, **0 errors** throughout), on two machines:
 
-| setup                            | throughput       | vector-tile p95 |
-|----------------------------------|------------------|-----------------|
-| 1 container, 50 VUs              | ~640 req/s       | 632 ms          |
-| 1 container, 200 VUs (saturated) | ~610 req/s       | 2.7 s           |
-| **4 replicas + LB, 200 VUs**     | **~1,275 req/s** | **745 ms**      |
+| setup                            | Windows, 32 cores, k6 in-network | M1 Max, Docker VM 8 CPUs, k6 on the host |
+|----------------------------------|----------------------------------|------------------------------------------|
+| 1 container, 50 VUs              | ~640 req/s, p95 632 ms           | ~1,270 req/s, p95 354 ms                 |
+| 1 container, 200 VUs (saturated) | ~610 req/s, p95 2.7 s            | ~1,270 req/s, p95 1.47 s                 |
+| **4 replicas + LB, 200 VUs**     | **~1,275 req/s, p95 745 ms**     | ~1,140 req/s, p95 769 ms                 |
 
-A single light container saturates around ~640 req/s / ~40 MB/s (one JS event loop) and degrades by adding latency, not
-errors. It's stateless, so scaling out is the answer: four replicas behind an LB roughly doubled throughput and cut p95
-~3.6× on the same load. On one box the shared MinIO/LB/client cap it near 2×; in production a real object store, a
-managed LB, and — the big multiplier — **a CDN in front** (the tile `Cache-Control` headers are already set for it) lift
-it much further. Method, full tables and the load script:
+Capacity, with arrivals at a fixed rate instead (open model, M1 Max): one container holds a vector-tile p95 under
+200 ms up to **~200 iterations/s, about 740 req/s**; at 250 it is 272 ms and climbing.
+
+A single light container saturates by ~50 concurrent users and degrades by adding latency, not errors. It's stateless,
+so scaling out is the answer: on the Windows host four replicas behind an LB roughly doubled throughput and cut p95
+~3.6× on the same load. On one box the shared MinIO/LB/client cap it near 2×, and on the Mac, measured through Docker
+Desktop's host port forward, four replicas gave no gain at all; scaling comparisons need k6 in-network. In production a
+real object store, a managed LB, and — the big multiplier — **a CDN in front** (the tile `Cache-Control` headers are
+already set for it) lift it much further. Method, full tables, the macOS port-forward caveat and the load script:
 [`tileserver-gl-dev/k6/README.md`](tileserver-gl-dev/k6/README.md).
 
 ## Light/dark theme switch
