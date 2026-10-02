@@ -9,9 +9,10 @@
 #   secrets   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (a Docker Hub access token with read/write access)
 #   variable  DOCKERHUB_REPOSITORY (optional, default stsdockerhub/tileserver-gl)
 #
-# Each architecture builds on its own native runner: light first, then light-s3 FROM that local light image, so the
-# pair always comes from one commit. Publishing pushes per-architecture tags (<version>-light-amd64, ...), then the
-# manifest job combines them under the plain tags, which pull the right architecture automatically.
+# Each architecture builds on its own native runner: light first, pushed by digest (no tag), then light-s3 FROM that
+# digest, so the pair always comes from one commit. On a version tag the digests go to Docker Hub, and the manifest job
+# combines each image's two digests under its plain tag, which pulls the right architecture automatically; no
+# per-architecture tags are created. Elsewhere the same chain pushes to a throwaway registry on the runner instead.
 
 name: Docker images
 
@@ -79,9 +80,19 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    # A throwaway registry for builds that do not publish: light is pushed there by digest so light-s3 can build on it.
+    services:
+      registry:
+        image: registry:2
+        ports: ['5000:5000']
     env:
       VERSION: ${{ needs.version.outputs.version }}
       PUBLISH: ${{ needs.version.outputs.publish }}
+      # Where the untagged per-architecture images go: Docker Hub when publishing, the runner's registry otherwise.
+      TARGET: >-
+        ${{ needs.version.outputs.publish == 'true'
+            && (vars.DOCKERHUB_REPOSITORY || 'stsdockerhub/tileserver-gl')
+            || 'localhost:5000/tileserver-gl' }}
     steps:
       - uses: actions/checkout@v4
       - name: Log in to Docker Hub
@@ -90,12 +101,15 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      # The docker driver builds into the runner's own image store, so the light-s3 build can use the light image just
-      # built as its base without a registry round trip.
+      # Host networking lets the builder reach the runner's registry on localhost:5000, which speaks plain HTTP.
       - uses: docker/setup-buildx-action@v3
         with:
-          driver: docker
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
       - name: Build light
+        id: light
         uses: docker/build-push-action@v6
         with:
           context: tileserver-gl
@@ -106,27 +120,39 @@ jobs:
             UPSTREAM_VERSION=${{ needs.version.outputs.upstream }}
             REVISION=${{ needs.version.outputs.revision }}
             CREATED=${{ needs.version.outputs.created }}
-          tags: ${{ env.REPOSITORY }}:${{ env.VERSION }}-light-${{ matrix.arch }}
-          push: ${{ env.PUBLISH == 'true' }}
+          outputs: type=image,name=${{ env.TARGET }},push-by-digest=true,name-canonical=true,push=true
       - name: Build light-s3
+        id: s3
         uses: docker/build-push-action@v6
         with:
           context: tileserver-gl-data
           file: tileserver-gl/Dockerfile_light_s3
           platforms: linux/${{ matrix.arch }}
           build-args: |
-            BASE=${{ env.REPOSITORY }}:${{ env.VERSION }}-light-${{ matrix.arch }}
+            BASE=${{ env.TARGET }}@${{ steps.light.outputs.digest }}
             VERSION=${{ needs.version.outputs.version }}
             UPSTREAM_VERSION=${{ needs.version.outputs.upstream }}
             REVISION=${{ needs.version.outputs.revision }}
             CREATED=${{ needs.version.outputs.created }}
-          tags: ${{ env.REPOSITORY }}:${{ env.VERSION }}-light-s3-${{ matrix.arch }}
-          push: ${{ env.PUBLISH == 'true' }}
+          outputs: type=image,name=${{ env.TARGET }},push-by-digest=true,name-canonical=true,push=true
       - name: Smoke test
         run: |
-          reported=$(docker run --rm "$REPOSITORY:$VERSION-light-s3-${{ matrix.arch }}" --version | tail -1)
+          reported=$(docker run --rm "$TARGET@${{ steps.s3.outputs.digest }}" --version | tail -1)
           echo "light-s3 reports $reported"
           [[ "$reported" == "$VERSION" ]]
+      - name: Record digests
+        if: env.PUBLISH == 'true'
+        run: |
+          mkdir -p digests
+          echo "${{ steps.light.outputs.digest }}" > "digests/light-${{ matrix.arch }}"
+          echo "${{ steps.s3.outputs.digest }}" > "digests/light-s3-${{ matrix.arch }}"
+      - name: Upload digests
+        if: env.PUBLISH == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: digests/
+          retention-days: 1
 
   manifest:
     needs: [version, build]
@@ -135,6 +161,11 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: digests
+          merge-multiple: true
       - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -144,6 +175,6 @@ jobs:
         run: |
           for image in light light-s3; do
             docker buildx imagetools create -t "$REPOSITORY:$VERSION-$image" \
-              "$REPOSITORY:$VERSION-$image-amd64" "$REPOSITORY:$VERSION-$image-arm64"
+              "$REPOSITORY@$(cat "digests/$image-amd64")" "$REPOSITORY@$(cat "digests/$image-arm64")"
             docker buildx imagetools inspect "$REPOSITORY:$VERSION-$image"
           done

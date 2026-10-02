@@ -22,6 +22,12 @@ remains for a manual, single-architecture publish.
 
 ## [Unreleased]
 
+### Changed
+
+- The image workflow publishes only the plain `<version>-light` and `<version>-light-s3` tags: each architecture's
+  image is pushed by digest and combined from there, so Docker Hub no longer gets `-amd64` / `-arm64` tags. Builds on
+  main and pull requests run the same chain against a throwaway registry on the runner.
+
 ## [1.0.0] - 2026-10-02
 
 Upstream: tileserver-gl 5.7.0-pre.1. 5.7.0-pre.0 was vendored on 2026-08-04 (commit 401c968), replacing the earlier
