@@ -115,6 +115,21 @@ async function start (opts) {
     )
   }
 
+  // The server listens before its styles and data have loaded (on start and after every SIGHUP reload), and until then a
+  // tile or style route is not registered yet, so a request would get 404: blank tiles that a client and a CDN take for real.
+  // Answer everything but /health with a retryable, uncached 503 until startup completes.
+  let startupComplete = false
+  app.use((req, res, next) => {
+    if (startupComplete || req.path === '/health') {
+      return next()
+    }
+    return res
+      .status(503)
+      .set({ 'Retry-After': '1', 'Cache-Control': 'no-store' })
+      .type('text/plain')
+      .send('Starting')
+  })
+
   // Optional API-key / TTL-token gate, enabled by env; off (no middleware) when unset. See docs/2.USAGE.md for the env vars and token format.
   const apiKeys = (process.env.TILESERVER_GL_API_KEYS || '').split(',').map((k) => k.trim()).filter(Boolean)
   const tokenSecret = process.env.TILESERVER_GL_TOKEN_SECRET || ''
@@ -248,6 +263,7 @@ async function start (opts) {
       return value.replace(
         /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g,
         (match, name, fallback) => {
+          // eslint-disable-next-line security/detect-object-injection -- name is a variable name from the config file, limited by the pattern above
           const v = process.env[name]
           if (v !== undefined && v !== '') {
             return v
@@ -1114,7 +1130,6 @@ async function start (opts) {
     }
   })
 
-  let startupComplete = false
   const startupPromise = Promise.all(startupPromises).then(() => {
     console.log('Startup complete')
     startupComplete = true
