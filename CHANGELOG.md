@@ -27,6 +27,8 @@ remains for a manual, single-architecture publish.
 - The image workflow publishes only the plain `<version>-light` and `<version>-light-s3` tags: each architecture's
   image is pushed by digest and combined from there, so Docker Hub no longer gets `-amd64` / `-arm64` tags. Builds on
   main and pull requests run the same chain against a throwaway registry on the runner.
+- The workflow's actions run on Node.js 24 (checkout, setup-node and upload-artifact v7, download-artifact v8,
+  docker login v4, setup-buildx v4, build-push v7), clearing GitHub's Node.js 20 deprecation warning.
 
 ## [1.0.0] - 2026-10-02
 
